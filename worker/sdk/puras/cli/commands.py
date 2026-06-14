@@ -88,6 +88,31 @@ def _skill_ref(args) -> tuple[dict, str]:
     return {"skillpack_id" if _is_uuid(ref) else "skillpack": ref}, skill
 
 
+def _resolve_llm_key(args) -> str | None:
+    """Resolve the BYO LLM key for a local run/serve/eval.
+
+    Priority: `--api-key` → `$ANTHROPIC_API_KEY` → interactive terminal
+    prompt. A local run is BYO key (you call the provider, you pay the bill),
+    so when neither the flag nor the env var is set we ask for it right here
+    instead of letting the run fail. Returns the key, or None when there's no
+    TTY to prompt on (the downstream runner then raises its own clear
+    "no LLM key" error)."""
+    import os
+
+    key = getattr(args, "api_key", None) or os.environ.get("ANTHROPIC_API_KEY")
+    if key:
+        return key
+    if not sys.stdin.isatty():
+        return None
+    info(dim("no LLM key found — a local run is BYO key (you call the provider, you pay the bill)."))
+    try:
+        key = getpass.getpass("ANTHROPIC_API_KEY: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return None
+    return key or None
+
+
 def _dashboard_keys_url(api_base: str) -> str:
     if "localhost" in api_base or "127.0.0.1" in api_base:
         return "http://localhost:3000/api-keys"
@@ -358,11 +383,12 @@ def _run_local(args) -> None:
         ) from None
     inputs = _build_inputs(args)
     bundle_dir = args.dir or "."
+    api_key = _resolve_llm_key(args)
     info(f"running `{args.skill or '(sole skill)'}` from {bundle_dir} — offline, your key")
     try:
         res = run_local(
             bundle_dir, inputs,
-            skill=args.skill, model=args.model, api_key=args.api_key,
+            skill=args.skill, model=args.model, api_key=api_key,
         )
     except LocalRunError as e:
         raise CliError(str(e)) from None
@@ -428,16 +454,16 @@ def cmd_serve(args) -> None:
             f"(or `pip install puras-runner`), then retry `puras serve`. [{e}]"
         ) from None
 
-    import os
-
     root = Path(args.dir or ".").expanduser().resolve()
     if not root.is_dir():
         raise CliError(f"bundle dir not found: {root}")
 
+    api_key = _resolve_llm_key(args)
+
     app = LocalServer(
         str(root),
         model=args.model,
-        api_key=args.api_key,
+        api_key=api_key,
         require_key=args.require_key,
         on_log=lambda m: print(dim(m)),
     )
@@ -448,7 +474,7 @@ def cmd_serve(args) -> None:
     if not skills:
         raise CliError(f"no skills found in {root} — need a `<skill>/skill.yaml` dir")
 
-    if not (args.api_key or os.environ.get("ANTHROPIC_API_KEY")):
+    if not api_key:
         warn("no LLM key — set ANTHROPIC_API_KEY (or pass --api-key); jobs will fail until one is set")
 
     base = f"http://{args.host}:{args.port}"
@@ -682,11 +708,12 @@ def _eval_local(args) -> None:
             f"(or `pip install puras-runner`), then retry `puras eval --local`. [{e}]"
         ) from None
     bundle_dir = args.dir or "."
+    api_key = _resolve_llm_key(args)
     info(f"evaluating `{args.skill or '(sole skill)'}` from {bundle_dir} — offline, your key")
     try:
         rep = run_eval_local(
             bundle_dir,
-            skill=args.skill, model=args.model, api_key=args.api_key,
+            skill=args.skill, model=args.model, api_key=api_key,
             case_ids=args.case, repeat=args.repeat or 1, threshold=args.threshold,
         )
     except LocalRunError as e:
