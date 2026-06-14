@@ -290,11 +290,14 @@ def _proc_output_text(stdout: Any, stderr: Any) -> str:
 
 
 def _run_bash(command: str, timeout: int, cwd: Path, env_extra: dict[str, str]) -> dict:
-    import os
+    from .proc_env import safe_base_env
 
     s = get_settings()
     t = max(1, min(s.bash_max_timeout, timeout or s.bash_default_timeout))
-    env = {**os.environ, **env_extra}
+    # Allowlisted base env (P1-5): bash gets safe system vars + the skillpack
+    # secrets/PURAS_WORKSPACE_ID in `env_extra` — NOT the worker's platform
+    # secrets. So a skill can't `echo $DATABASE_URL` / $PURAS_SERVICE_TOKEN.
+    env = {**safe_base_env(s.skill_env_passthrough_list), **env_extra}
     try:
         # Mark the shell (and any ffmpeg it forks) the kernel's OOM victim so a
         # runaway encode is killed before the worker process — see proc_limits.

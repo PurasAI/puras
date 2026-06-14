@@ -72,6 +72,17 @@ class WorkerSettings(BaseSettings):
     bash_default_timeout: int = Field(60, alias="BASH_DEFAULT_TIMEOUT")
     bash_max_timeout: int = Field(600, alias="BASH_MAX_TIMEOUT")
 
+    # Skill-subprocess env isolation (P1-5): bash + deterministic functions get an
+    # ALLOWLISTED env (see proc_env.safe_base_env), NOT the worker's full os.environ
+    # — so platform secrets (DATABASE_URL, service token, provider keys) never leak
+    # into skill code. This is a comma-separated escape hatch of EXTRA var names to
+    # pass through, for a deployment that legitimately relied on an inherited var.
+    skill_env_passthrough: str = Field("", alias="SKILL_ENV_PASSTHROUGH")
+
+    @property
+    def skill_env_passthrough_list(self) -> list[str]:
+        return [n.strip() for n in self.skill_env_passthrough.split(",") if n.strip()]
+
     # Internal worker → API auth + base URL for media generation calls
     api_base: str = Field("http://localhost:8000", alias="PURAS_API_BASE")
     service_token: str = Field(..., alias="PURAS_SERVICE_TOKEN")

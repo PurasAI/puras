@@ -414,6 +414,64 @@ def cmd_run(args) -> None:
         info(f"job {job['id']} · {st} — still running; `puras logs {job['id']}`")
 
 
+def cmd_serve(args) -> None:
+    """`puras serve` — run a local HTTP API that mirrors the hosted job API,
+    backed by the offline runner. Point any Puras SDK at this base URL
+    (`apiBase` / `PURAS_API_BASE`) and build/test your whole app offline, on
+    your own LLM key, with no puras.co account; flip the base URL to
+    api.puras.co + `puras deploy` to ship the identical code."""
+    try:
+        from worker.local_server import LocalServer
+    except ImportError as e:
+        raise CliError(
+            "the offline runner isn't installed. Run `pip install puras[local]` "
+            f"(or `pip install puras-runner`), then retry `puras serve`. [{e}]"
+        ) from None
+
+    import os
+
+    root = Path(args.dir or ".").expanduser().resolve()
+    if not root.is_dir():
+        raise CliError(f"bundle dir not found: {root}")
+
+    app = LocalServer(
+        str(root),
+        model=args.model,
+        api_key=args.api_key,
+        require_key=args.require_key,
+        on_log=lambda m: print(dim(m)),
+    )
+    try:
+        skills = app.discover_skills()
+    except Exception as e:
+        raise CliError(f"invalid bundle at {root}: {e}") from None
+    if not skills:
+        raise CliError(f"no skills found in {root} — need a `<skill>/skill.yaml` dir")
+
+    if not (args.api_key or os.environ.get("ANTHROPIC_API_KEY")):
+        warn("no LLM key — set ANTHROPIC_API_KEY (or pass --api-key); jobs will fail until one is set")
+
+    base = f"http://{args.host}:{args.port}"
+    ok(f"puras serve · {bold(base)}")
+    info(f"  bundle   {dim(str(root))}")
+    info(f"  skills   {', '.join(skills)}")
+    if args.require_key:
+        info(f"  auth     Bearer {mask_key(args.require_key)}")
+    else:
+        info(dim("  auth     none — pass --require-key to emulate API-key auth"))
+    info("")
+    info("  Build your app against it — point any Puras SDK at this base URL:")
+    info(dim(f'    curl -s "{base}/v1/jobs?wait=true" -H "content-type: application/json" \\'))
+    info(dim(f"      -d '{{\"skill\": \"{skills[0]}\", \"inputs\": {{}}}}'"))
+    info(dim(f'    Client(api_key="local", api_base="{base}", skillpack="local").run("{skills[0]}", {{}})'))
+    info("")
+    info(dim("  Ctrl-C to stop"))
+    try:
+        app.serve_forever(args.host, args.port)
+    except KeyboardInterrupt:
+        info("\nstopped")
+
+
 def cmd_replay(args) -> None:
     """Re-run a past job's exact inputs as a new job. Pointed at your LOCAL api
     (with LOCAL_PROJECT_PATH set on the worker) this reproduces the run against
