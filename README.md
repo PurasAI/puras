@@ -23,7 +23,6 @@ two environments), so a skill behaves identically locally and in prod.
 ```bash
 pip install "puras[local]"
 puras run --local greeter --dir ./examples/hello-world -i name=Ada
-# BYO key — the CLI prompts for your ANTHROPIC_API_KEY if it isn't already set
 ```
 
 - 🧑‍💻 **Local-first** — run and iterate on a skill before deploying anything.
