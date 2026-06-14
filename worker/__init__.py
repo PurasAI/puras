@@ -6,4 +6,4 @@ behind `puras run --local` (see `worker.local_run`). The hosted-only modules
 imported on the offline path, so `pip install puras[local]` stays thin.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
