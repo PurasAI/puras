@@ -22,7 +22,6 @@ two environments), so a skill behaves identically locally and in prod.
 
 ```bash
 pip install "puras[local]"
-export ANTHROPIC_API_KEY=sk-ant-...     # BYO key — you call the provider, you pay the bill
 puras run --local greeter --dir ./examples/hello-world -i name=Ada
 ```
 
@@ -40,11 +39,14 @@ The whole point of this repo — a skill's agent loop on your machine, on your k
 
 ```bash
 pip install "puras[local]"        # the puras CLI + the offline runner
-export ANTHROPIC_API_KEY=sk-ant-...
 
 # the bundled "hello world" skillpack has two skills: greeter + formatter
 puras run --local greeter --dir ./examples/hello-world -i name="the Puras team"
 ```
+
+It's **BYO key**: you call the provider directly and pay your own bill. The CLI
+reads your key from `$ANTHROPIC_API_KEY` (or the `--api-key` flag) and, if
+neither is set, prompts for it in the terminal.
 
 From a checkout of this repo instead of PyPI:
 
