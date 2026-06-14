@@ -89,8 +89,14 @@ def run_function(
     if job_id:
         puras_env["PURAS_JOB_ID"] = job_id
 
+    # Allowlisted base env (P1-5): the function gets safe system/runtime vars,
+    # the skillpack's OWN secrets, and the platform-injected PURAS_* it needs —
+    # but NOT the worker's platform secrets (DATABASE_URL, Supabase keys, provider
+    # keys, …). See proc_env.safe_base_env.
+    from .proc_env import safe_base_env
+
     env = {
-        **os.environ,
+        **safe_base_env(s.skill_env_passthrough_list),
         **(secrets or {}),  # skillpack secrets override worker env if names collide
         **puras_env,        # platform-injected; always wins
         "PYTHONUNBUFFERED": "1",

@@ -27,6 +27,7 @@ puras run --local greeter --dir ./examples/hello-world -i name=Ada
 ```
 
 - 🧑‍💻 **Local-first** — run and iterate on a skill before deploying anything.
+- 🔌 **Local API** — `puras serve` exposes the hosted job API on `localhost`, so you build and test your app offline before you deploy.
 - 🔑 **Bring your own key** — your provider, your bill, nothing billed by a platform.
 - 🪶 **Dependency-light** — the offline path needs no DB/bucket/openai stack.
 - 🔁 **Prod parity** — the same loop and contracts as [Puras Cloud](https://puras.co).
@@ -99,6 +100,49 @@ puras eval --local content-repurposer --dir ./examples/content-studio --threshol
 grader runs on your BYO key. `--threshold N` is a CI gate — non-zero exit if the
 pass-rate is below `N`.
 
+## Build your app against a local API
+
+`puras run --local` answers *"does my skill work?"*. When you're building the
+**app** that calls the skill, you want the other half: a local server that speaks
+the same API your app will hit in production. That's `puras serve`:
+
+```bash
+puras serve --dir ./examples/hello-world          # → http://127.0.0.1:8787
+```
+
+It mirrors the hosted **job API** (`POST /v1/jobs`, `GET /v1/jobs/{id}`,
+`…/events`, `…/spans`) backed by the offline runner — in-memory, zero extra
+dependencies. Point any Puras SDK at it by changing one thing — the base URL —
+and your app runs unchanged, offline, on your own key:
+
+```python
+import puras
+
+# api_base is the only thing that differs between local and prod
+client = puras.Client(api_key="local", api_base="http://127.0.0.1:8787", skillpack="local")
+print(client.run("greeter", {"name": "Ada"}))
+```
+
+```ts
+import { Puras } from "puras";
+const puras = new Puras({ apiKey: "local", apiBase: "http://127.0.0.1:8787", skillpack: "local" });
+console.log(await puras.run("greeter", { name: "Ada" }));
+```
+
+…or just curl it:
+
+```bash
+curl -s "http://127.0.0.1:8787/v1/jobs?wait=true" \
+  -H "content-type: application/json" \
+  -d '{"skill": "greeter", "inputs": {"name": "Ada"}}'
+```
+
+When you ship, change the base URL to `https://api.puras.co` and `puras deploy` —
+the **same app code** now runs against the managed platform. Auth is open
+locally; `--require-key <token>` emulates API-key auth, and `--host` / `--port`
+change where it binds. (The Python and React-Native SDKs poll, so they work
+as-is; live SSE streaming is a Cloud feature.)
+
 ## Build your own skill
 
 ```bash
@@ -133,6 +177,7 @@ crippled core — it's the capabilities that need real infrastructure.
 | Setup & maintenance          | `pip install`, you run it                 | Fully managed, nothing to install              |
 | LLM key & billing            | Bring your own key, you pay the provider  | Managed, usage-based, transparent pricing      |
 | Agent loop & local tools     | ✓ text, `bash`, file tools, your Python tools, in-process subagents | ✓ same loop                |
+| Job API for your app         | ✓ `puras serve` — the job API on localhost | ✓ api.puras.co — managed, scaled, durable     |
 | Evals (`check`/`schema`/`rubric`) | ✓ per run + offline suites           | ✓ + suites at scale, CI gating, version diffs  |
 | Media (image/video/audio)    | —                                         | ✓ generation + persistence                     |
 | Web search / fetch / browser | —                                         | ✓                                              |
@@ -161,7 +206,7 @@ import time — and that's enforced by
 | `worker/` | The `puras-runner` runtime — the agent loop (`agent_runner.py`), the `RunContext` seam, the local entrypoint (`local_run.py`), skill loading, the eval runner. |
 | `worker/sdk/` | The `puras` package — the CLI and the SDK skills import at runtime. Ships as its own wheel. |
 | `examples/` | Runnable, offline-capable skillpacks. |
-| `tests/` | The dependency-light import-isolation guard + a CLI smoke test. |
+| `tests/` | The dependency-light import-isolation guard, a CLI smoke test, and the `puras serve` API tests. |
 
 ## Community & contributing
 

@@ -102,6 +102,22 @@ def build_parser() -> argparse.ArgumentParser:
     )
     rp.add_argument("--model", help="override the skill's model slug for --local")
 
+    # Local API server: mirror the hosted job API on localhost so an app can be
+    # built/tested against it offline, on the user's own LLM key, no account.
+    svp = add("serve", c.cmd_serve, "serve a local API for a bundle (the hosted job API, offline)")
+    svp.add_argument("--dir", help="bundle dir to serve (default: current directory)")
+    svp.add_argument("--host", default="127.0.0.1", help="bind host (default 127.0.0.1)")
+    svp.add_argument("--port", type=int, default=8787, help="bind port (default 8787)")
+    svp.add_argument(
+        "--api-key", dest="api_key",
+        help="LLM key used to run jobs (default: $ANTHROPIC_API_KEY)",
+    )
+    svp.add_argument("--model", help="override each skill's model slug")
+    svp.add_argument(
+        "--require-key", dest="require_key", metavar="TOKEN",
+        help="emulate API-key auth: require `Authorization: Bearer TOKEN` on /v1/* requests",
+    )
+
     gp = add("logs", c.cmd_logs, "stream a job's events until it finishes")
     gp.add_argument("job_id")
     gp.add_argument("--timeout", type=int, default=600)
