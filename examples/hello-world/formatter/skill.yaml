@@ -1,0 +1,40 @@
+title: Greeting Formatter
+description: >
+  A simple starter skill that lays out a small greeting card from a name.
+  Runs on its own or as a building block inside the Greeter example.
+
+entrypoint: scripts/format.py:run
+
+input_schema:
+  type: object
+  required: [name]
+  properties:
+    name:
+      type: string
+      maxLength: 60
+      description: Who the card greets.
+    shout:
+      type: string
+      maxLength: 120
+      description: Optional loud version of the name to headline the card.
+    poem:
+      type: text
+      maxLength: 400
+      description: Optional couplet to print under the headline (one line per line).
+
+output_schema:
+  type: object
+  properties:
+    card:
+      type: text
+      description: The assembled greeting card (plain text, framed in a box).
+
+examples:
+  - title: Just a name
+    inputs:
+      name: Ada
+  - title: With a shout and a couplet
+    inputs:
+      name: Ada
+      shout: "ADA!!!"
+      poem: "Hello dear Ada, bright and keen,\nThe finest coder we've ever seen."

@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# Tooling
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local runner scratch (workdirs + drive live under the temp dir by default,
+# but ignore any that land in-tree)
+puras-local/
+*.local-drive/
+
+# Env / secrets — a local run is BYO key; never commit it
+.env
+.env.*
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/

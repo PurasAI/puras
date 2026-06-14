@@ -1,0 +1,325 @@
+title: AI Content Repurposer
+description: "Paste one piece of content — a blog post, launch announcement, newsletter, or rough notes (a URL works too) — and get back an AI social media post written natively for each platform you pick: a punchy take for X, a story-led one for LinkedIn, a value-first one for Reddit, and a caption for Instagram or Threads. One input, a full set of channel-native drafts in your brand voice — not the same text copy-pasted everywhere."
+
+entrypoint: SKILL.md
+text_model: claude/sonnet-4-6
+
+input_schema:
+  type: object
+  required: [source_content]
+  properties:
+    source_content:
+      type: text
+      minLength: 1
+      maxLength: 8000
+      description: >
+        The source to repurpose — a blog post, announcement, newsletter, or
+        pasted notes. A URL works too; pull out its core message and reuse it.
+    platforms:
+      type: array
+      minItems: 1
+      uniqueItems: true
+      default: [linkedin, x, reddit, instagram]
+      description: Which platforms to write native posts for. One post per platform.
+      items:
+        type: string
+        enum: [linkedin, x, reddit, threads, instagram]
+    brand_voice:
+      type: string
+      maxLength: 400
+      description: >
+        Optional. How you sound — e.g. "warm and plain-spoken" or "bold and
+        technical". Shapes the tone consistently across every post.
+    cta:
+      type: string
+      maxLength: 200
+      description: Optional. The action to drive — e.g. "try it free", "read the full post".
+    link:
+      type: string
+      maxLength: 500
+      description: >
+        Optional. A URL to weave in where each platform allows it — in the body
+        for some, "link in bio" for Instagram.
+
+output_schema:
+  type: object
+  properties:
+    posts:
+      type: array
+      minItems: 1
+      description: >
+        One native post per requested platform, in the same language as the
+        source. Same core message, platform-specific voice and length.
+      items:
+        type: object
+        properties:
+          platform:
+            type: string
+            enum: [linkedin, x, reddit, threads, instagram]
+            description: Which platform this post is written for.
+          body:
+            type: text
+            description: The ready-to-post copy, written natively for this platform's norms and length.
+          hashtags:
+            type: array
+            items: { type: string }
+            description: >
+              Platform-appropriate hashtags. Empty where hashtags aren't the
+              norm (e.g. Reddit). Don't repeat them inside `body`.
+          char_count:
+            type: integer
+            description: Character count of `body`, so you can see at a glance that it fits the platform's limit.
+
+tools:
+  - name: check_post
+    description: >
+      Deterministically validate one drafted post before you finalize it:
+      counts the body's characters, checks them against the platform's limit,
+      and flags any hashtag that also appears inside the body. Returns the exact
+      `char_count` to put in your output. Call it once per post and fix whatever
+      it reports — don't eyeball lengths or hashtags yourself.
+    entrypoint: tools/check_post.py:run
+    input_schema:
+      type: object
+      required: [platform, body]
+      properties:
+        platform:
+          type: string
+          enum: [linkedin, x, reddit, threads, instagram]
+          description: The platform this post targets (sets the character limit).
+        body:
+          type: text
+          description: The post body to validate — exactly what will go in the output `body`.
+        hashtags:
+          type: array
+          items: { type: string }
+          description: The hashtags you plan to attach, so it can check none are duplicated inside `body`.
+    output_schema:
+      type: object
+      properties:
+        char_count:
+          type: integer
+          description: Exact character count of `body` — use this value in your output.
+        limit:
+          type: integer
+          description: The platform's character ceiling for the body.
+        within_limit:
+          type: boolean
+          description: True if `char_count` is within the platform limit.
+        over_by:
+          type: integer
+          description: How many characters over the limit (0 when within).
+        duplicate_hashtags:
+          type: array
+          items: { type: string }
+          description: Hashtags found inside `body` that should live only in the `hashtags` field.
+        ok:
+          type: boolean
+          description: True when the post is within the limit and has no duplicated hashtags.
+        issues:
+          type: array
+          items: { type: string }
+          description: Human-readable problems to fix; empty when `ok` is true.
+
+# Evals are to this skill what unit tests are to code: after every run, each
+# grader scores THAT run's output in [0,1]; the weighted mean (×100) is the
+# job's eval_score, shown on the job cards/tables. Two layers:
+#   - check  → deterministic Python assertions (evals/checks.py). Objective and
+#              free: one post per platform, char limits, hashtag hygiene, honest
+#              char_count, no copy-paste between posts.
+#   - rubric → LLM-as-judge for the things only a reader can tell: native voice,
+#              same message across platforms, right language.
+evals:
+  graders:
+    - name: platform_coverage
+      kind: check
+      weight: 2
+      entrypoint: evals/checks.py:platform_coverage
+    - name: char_limits
+      kind: check
+      weight: 2
+      entrypoint: evals/checks.py:char_limits
+    - name: hashtag_hygiene
+      kind: check
+      weight: 1
+      entrypoint: evals/checks.py:hashtag_hygiene
+    - name: char_count_accuracy
+      kind: check
+      weight: 1
+      entrypoint: evals/checks.py:char_count_accuracy
+    - name: distinctness
+      kind: check
+      weight: 1
+      entrypoint: evals/checks.py:distinctness
+    - name: native_voice
+      kind: rubric
+      weight: 2
+      criteria: >
+        Does each post read as if it were written natively for its own platform,
+        following that platform's norms? LinkedIn: a hook line, short paragraphs,
+        a soft question, 1–3 PascalCase hashtags. X: ≤280 chars, punchy, lowercase
+        ok, 0–2 hashtags. Reddit: conversational, value-first, NO marketing speak,
+        ends with a genuine question. Instagram: scroll-stopping first line, light
+        emoji, "link in bio" instead of a pasted URL. Threads: casual, a friendlier
+        X. Penalize posts that all read the same or ignore their platform's voice.
+      levels:
+        "0": Posts ignore platform norms or are the same text reused everywhere.
+        "0.5": Roughly right but several platform conventions are missed.
+        "1": Each post clearly tailored to its platform's voice and conventions.
+    - name: message_fidelity
+      kind: rubric
+      weight: 2
+      criteria: >
+        Do all posts carry the SAME core message and the same key facts/numbers
+        from source_content, with nothing fabricated? Every post must preserve the
+        central point and any concrete numbers in the source; none may invent
+        facts, metrics, quotes, or claims that aren't in (or clearly implied by)
+        the source.
+      levels:
+        "0": Posts contradict each other or fabricate facts/numbers not in the source.
+        "0.5": Core message mostly preserved but a fact drifts or a number is off.
+        "1": Every post keeps the same core message and the source's facts/numbers faithfully.
+    - name: language_match
+      kind: rubric
+      weight: 1
+      criteria: >
+        Is every post written in the SAME language as source_content (e.g. a
+        Turkish source yields all-Turkish posts, established English hashtags
+        aside)? Score 0 if any post switches language.
+      levels:
+        "0": One or more posts are in a different language than the source.
+        "1": Every post is in the same language as the source.
+
+examples:
+  - title: Feature launch → 4 platforms
+    description: >
+      A one-paragraph product launch note, repurposed into a native post for
+      LinkedIn, X, Reddit, and Instagram — same news, four different voices.
+    inputs:
+      source_content: >
+        We just shipped Instant Rollback — one click to restore any previous
+        deploy in under 5 seconds. No more frantic 2am redeploys: pick a version
+        from the timeline, hit restore, and you're back. It's live for every
+        project, on every plan, today.
+      platforms: [linkedin, x, reddit, instagram]
+      brand_voice: confident, developer-to-developer, lightly playful
+      cta: try it on your next deploy
+    outputs:
+      posts:
+        - platform: linkedin
+          body: |
+            Shipping fast means occasionally shipping bugs. Today we made the recovery just as fast.
+
+            Introducing Instant Rollback ⏪ — restore any previous deploy in under 5 seconds. One click, no redeploy.
+
+            Pick a version from the timeline → hit restore → you're back. Live for every project, on every plan, today.
+
+            What's your worst 2am deploy story?
+          hashtags: ["#DevOps", "#DeveloperExperience", "#ShipFast"]
+          char_count: 332
+        - platform: x
+          body: |
+            shipped: Instant Rollback ⏪
+
+            restore any previous deploy in <5s. one click. no redeploy.
+
+            pick a version → restore → you're back. live on every plan today.
+          hashtags: ["#buildinpublic"]
+          char_count: 168
+        - platform: reddit
+          body: |
+            We kept seeing teams panic-redeploy to undo a bad release, so we built one-click rollback: pick any previous deploy off the timeline and you're restored in under 5 seconds. It's free on every plan.
+
+            Curious how everyone else handles fast recovery right now — feature flags, blue/green, or just roll forward and hotfix?
+          hashtags: []
+          char_count: 318
+        - platform: instagram
+          body: |
+            2am you, meet your new best friend ⏪✨
+
+            One tap to roll back any deploy in under 5 seconds. No stress, no redeploy. Live today on every plan 🚀
+          hashtags: ["#devlife", "#startup", "#codinglife", "#shipit", "#saas"]
+          char_count: 142
+  - title: Blog post → LinkedIn + X
+    description: Just two platforms, with a link to weave in.
+    inputs:
+      source_content: >
+        Our new guide breaks down how to cut cloud costs by 40% without touching
+        reliability: right-size before you autoscale, kill idle staging
+        environments overnight, and move cold data to object storage. Three
+        changes, one afternoon of work.
+      platforms: [linkedin, x]
+      brand_voice: practical, no hype
+      cta: read the full guide
+      link: https://example.com/cut-cloud-costs
+
+# Optional SEO/landing copy for the public skill page (see
+# /docs/skill-yaml-reference). Page-only; never read by the runtime.
+marketing:
+  cta: "Repurpose your content"
+  keywords:
+  - ai social media post generator
+  - blog to twitter thread generator
+  - blog to linkedin post generator
+  - repurpose blog post to social media
+  - ai social media post generator from url
+  - platform native social media posts ai
+  - turn blog into linkedin post
+  - ai content repurposing tool for written content
+  - repurpose content for x linkedin reddit instagram
+  - on brand voice social media posts ai
+  - turn one piece of content into many posts
+  - ai post generator that sounds like you not a template
+  features:
+  - title: Native per platform, not copy-paste
+    body: A punchy, hashtag-light take for X; a longer, story-led one for LinkedIn; a value-first, no-spam
+      one for Reddit; a caption with an emoji and hashtag block for Instagram. Each post is written for
+      its feed.
+  - title: One input, a full set of drafts
+    body: Hand it a single source — even a URL or pasted notes — and it pulls out the core message and
+      produces one ready-to-post draft per platform in a single run.
+  - title: Keeps your voice and your link
+    body: Set a brand voice and a call-to-action and every draft stays on-tone and routes readers to the
+      same link, so the set feels coherent across channels.
+  - title: Built into your workflow
+    body: Call it over one API to repurpose content automatically as you publish — drop the drafts into
+      your scheduler or review queue.
+  personas:
+  - title: Founders & solo creators
+    body: Turn one post into a week of channel-native content without rewriting it four times by hand.
+  - title: Content & social teams
+    body: Keep every channel fed from a single source of truth, on-voice, at the cadence your calendar
+      needs.
+  - title: Developer & product teams
+    body: Wire content repurposing into your CMS or publishing flow so drafts appear the moment something
+      ships.
+  comparison:
+    competitor_label: "Repurpose.io"
+    rows:
+    - dimension: "Pricing"
+      competitor: "Monthly subscription tiers"
+      puras: "Usage-based — pay per repurpose run, exact cost each run"
+    - dimension: "What it does"
+      competitor: "Routes and recycles posts and clips between channels"
+      puras: "Rewrites one source into a native post per platform"
+    - dimension: "Voice"
+      competitor: "The same content reformatted"
+      puras: "One brand voice and CTA applied, each post written for its feed"
+    - dimension: "Where it runs"
+      competitor: "A web app you connect accounts to"
+      puras: "API-native — repurpose as you publish, into your own workflow"
+  faq:
+  - q: "How do I turn one blog post into social media posts for every platform?"
+    a: "Paste the blog post as your source content and pick your platforms (X, LinkedIn, Reddit, Instagram, Threads). In one run you get a native post per platform — same core message, each written for that feed's voice, length, and hashtag norms."
+  - q: "What is the best AI tool to repurpose written content, not video?"
+    a: "This skill is purpose-built for the text lane: blog posts, launch announcements, newsletters, or rough notes in, native per-platform social posts out. It's not a video-to-clips tool — it adapts your written message to each platform instead of cutting up footage."
+  - q: "Can I generate posts from a URL or do I have to paste the text?"
+    a: "Both work. Paste the content directly, or give it a URL — the skill pulls out the core message, key facts, and numbers and reuses them, without inventing anything that isn't in the source."
+  - q: "How do I make AI social posts that don't sound generic or robotic?"
+    a: "Set a brand_voice (e.g. \"warm and plain-spoken\" or \"bold and technical\") and it's applied consistently across every post, then bent toward each platform's norms — so the drafts read on-brand, not like the same template engine wrote all of them."
+  - q: "How do I adapt the same content for LinkedIn vs X vs Reddit vs Instagram?"
+    a: "It writes each one natively: a longer, story-led LinkedIn post; a punchy sub-280-character take for X; a value-first, no-marketing-speak Reddit post that ends with a real question; and a scroll-stopping Instagram caption with a hashtag block and \"link in bio.\""
+  - q: "How do I write Reddit posts that don't sound promotional?"
+    a: "The Reddit output is value-first by design — it leads with the useful insight or problem, mentions the product as a solution without a sales pitch, uses no hashtags, and ends with a genuine question, so it fits the subreddit's tone instead of reading like an ad."
+  - q: "Does repurposing content across platforms count as duplicate content or hurt SEO?"
+    a: "Repurposing isn't copy-pasting. Each platform gets a distinctly rewritten post rather than the identical text, so it reads as native per-channel content — two posts that read the same way is treated as a failure here, not the goal."

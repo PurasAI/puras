@@ -1,0 +1,37 @@
+title: My Skill
+description: >
+  One line on what this skill does — shown on the skill page and read by
+  agents deciding when to call it.
+
+# A `SKILL.md` entrypoint makes this skill AGENTIC: the markdown is the system
+# prompt of an agent run with your declared tools. A `scripts/x.py:func`
+# entrypoint makes it deterministic instead — plain Python, no LLM.
+entrypoint: SKILL.md
+
+# Optional `family/variant` model for agentic skills — omit for the platform
+# default. Media slots exist too: image_model / video_model / audio_model.
+# text_model: claude/haiku-4-5
+
+input_schema:
+  type: object
+  required: [prompt]
+  properties:
+    prompt:
+      type: string
+      description: What the user wants, in their words.
+
+# Declare output fields only — the platform auto-requires every field and
+# prunes anything extra. `type: text` renders multi-line in the playground;
+# richer types (image, video, color) render uploads and pickers.
+output_schema:
+  type: object
+  properties:
+    answer:
+      type: text
+      description: The skill's result.
+
+# Real inputs the playground offers as one-click starting points.
+examples:
+  - title: Try it
+    inputs:
+      prompt: Introduce yourself in one short paragraph.

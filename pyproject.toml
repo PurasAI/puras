@@ -1,0 +1,58 @@
+# Publishable `puras-runner` distribution: the OPEN-SOURCE offline runner — the
+# same `worker` runtime the hosted platform runs, made pip-installable so
+# `puras run --local` works from a plain `pip install` with no repo checkout.
+#
+# The dependency list here is the DEPENDENCY-LIGHT offline surface (no Postgres,
+# no bucket, no openai SDK): the hosted-only modules (db / queue / storage /
+# memory / main) still live in the package but are never imported on the offline
+# path (every call site is gated on `ctx.platform_enabled`), so they don't drag
+# their heavy deps into a local install. The HOSTED worker image installs the
+# full stack from `requirements.txt` instead — this wheel is for local runs.
+#
+# Build/publish:   cd worker && uv build && uv publish
+# Local install:   pip install ./worker         (gives `import worker` + the runner)
+# Via the SDK:     pip install puras[local]     (pulls this as an extra)
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "puras-runner"
+dynamic = ["version"]
+description = "Puras offline runner — run a skill's agent loop locally on your own LLM key."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "Puras" }]
+keywords = ["puras", "agents", "ai", "local", "runner", "offline"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+]
+# The offline import path (worker.local_run → agent loop) needs only these.
+# Verified by tests/dry/test_local_import_isolation.py, which blocks the heavy
+# stack (sqlalchemy / asyncpg / storage3 / posthog / openai) and imports the
+# whole local graph.
+dependencies = [
+  "anthropic>=0.42,<1",
+  "pydantic>=2.10,<3",
+  "pydantic-settings>=2.6,<3",
+  "jsonschema>=4.20,<5",
+  "structlog>=24.4",
+  "httpx>=0.27,<0.28",
+  "pyyaml>=6.0,<7",
+]
+
+[tool.hatch.version]
+path = "worker/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["worker"]
+# The publishable `puras` SDK is rooted inside this tree (worker/sdk) and ships
+# as its OWN wheel — keep it out of the runner wheel.
+exclude = ["worker/sdk", "**/__pycache__", "**/*.pyc"]
+
+[tool.hatch.build.targets.sdist]
+include = ["worker", "pyproject.toml"]
+exclude = ["worker/sdk", "**/__pycache__", "**/*.pyc"]

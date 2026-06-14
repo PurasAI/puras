@@ -1,0 +1,53 @@
+# Publishable `puras` distribution: the runtime SDK (imported inside deployed
+# skills) + the `puras` CLI (deploy / run / logs from your terminal & CI).
+#
+# This package is ROOTED HERE — inside the worker tree — on purpose: the worker
+# image copies `worker/` and injects this exact `puras/` dir onto the skill
+# subprocess PYTHONPATH (see worker/worker/function_runner.py SDK_PATH). Keeping
+# the package source here means the worker runtime and the published wheel are
+# the SAME code, with zero changes to the worker image or its build context.
+#
+# Build/publish:   cd worker/worker/sdk && uv build && uv publish
+# Local install:   pip install ./worker/worker/sdk     (gives `import puras` + `puras`)
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "puras"
+dynamic = ["version"]
+description = "Puras SDK + CLI — deploy and call long-running agentic skills on Puras."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "Puras" }]
+keywords = ["puras", "agents", "ai", "backend", "cli", "sdk", "mcp"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+]
+dependencies = ["httpx>=0.27", "pyyaml>=6"]
+
+[project.optional-dependencies]
+# `pip install puras[local]` adds the open-source offline runner so
+# `puras run --local` works with no repo checkout. It's a dependency-light
+# install (no Postgres/bucket/openai) — see worker/pyproject.toml.
+local = ["puras-runner>=0.1"]
+
+[project.scripts]
+puras = "puras.cli:main"
+
+[project.urls]
+Homepage = "https://puras.co"
+Documentation = "https://puras.co/docs"
+
+[tool.hatch.version]
+path = "puras/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["puras"]
+
+[tool.hatch.build.targets.sdist]
+# Ship only the package; the worker keeps the rest of the tree.
+include = ["puras", "README.md", "pyproject.toml"]

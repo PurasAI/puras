@@ -1,0 +1,36 @@
+skillpack_id: b55f9b9a-4f64-4ceb-8627-858090bb3e1b
+slug: content-studio
+
+title: Content Studio
+description: >
+  AI content skills for repurposing what you've already written — turn one
+  blog post, announcement, or rough note into native posts for X, LinkedIn,
+  Instagram, and more.
+
+marketing:
+  headline: Write it once. Publish it everywhere.
+  subheadline: >
+    Paste one piece of content — or just a URL — and get back posts written
+    natively for each platform: a punchy take for X, a story-led post for
+    LinkedIn, a value-first caption for Instagram.
+  features:
+    - title: Native per platform, not copy-pasted
+      body: Each platform gets its own voice, structure, and length — a thread reads like a thread, not a chopped-up blog post.
+    - title: A URL is enough
+      body: Point it at a published post or announcement and it reads the page itself before rewriting.
+    - title: Your tone, kept
+      body: It works from your original copy, so the opinions and voice stay yours — only the format changes.
+  personas:
+    - title: Founders & solo builders
+      body: Every launch note becomes a week of social content in one run.
+    - title: Content & social teams
+      body: Repurpose the back catalog into platform-native posts at scale.
+    - title: Newsletter writers
+      body: Each issue ships with its own X and LinkedIn distribution, automatically.
+  faq:
+    - q: What can I feed it?
+      a: A blog post, a launch announcement, a newsletter issue, rough notes — pasted as text or as a URL it fetches itself.
+    - q: Which platforms does it write for?
+      a: You pick the targets per run — X, LinkedIn, Instagram, and more — and each gets a post written natively for that feed.
+    - q: Will every post sound the same?
+      a: No. The skill writes per-platform, so the X take is punchy, the LinkedIn post is story-led, and the caption is value-first — same substance, native form.

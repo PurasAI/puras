@@ -1,0 +1,7 @@
+# Eval dataset for `greeter` — one JSON case per line (blank lines + `#` comments
+# are ignored). `inputs` is required; `expected` is the golden output handed to
+# exact_match graders. The `shout` field comes from the deterministic `emphasize`
+# tool, so it's safe to assert exactly; the rest of the card is graded by shape.
+{"id": "ada", "inputs": {"name": "Ada", "style": "playful"}, "expected": {"shout": "ADA!!!"}, "tags": ["smoke"]}
+{"id": "team", "inputs": {"name": "the Puras team", "style": "formal"}, "expected": {"shout": "THE PURAS TEAM!!!"}}
+{"id": "lowercase", "inputs": {"name": "grace hopper", "style": "friendly"}, "expected": {"shout": "GRACE HOPPER!!!"}}

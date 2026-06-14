@@ -1,0 +1,94 @@
+title: Greeter
+description: >
+  A tiny "hello world" starter that shows off the full skill toolkit in one run.
+  Give it a name and it builds a little greeting card — a handy template for
+  your own skills.
+
+entrypoint: SKILL.md
+text_model: claude/haiku-4-5
+
+# Model routing: run on cheap Haiku, but if it can't produce a schema-valid
+# `set_output` after 2 tries, escalate to Sonnet for the rest of the run. You pay
+# premium only when the cheap model actually struggles — the run timeline shows a
+# "Model escalated" row when it happens.
+routing:
+  escalate_to: claude/sonnet-4-6
+  on: [schema_fail]
+  after: 2
+
+input_schema:
+  type: object
+  required: [name]
+  properties:
+    name:
+      type: string
+      maxLength: 60
+      description: Who to greet, e.g. "Ada" or "the Puras team".
+    style:
+      type: string
+      enum: [friendly, formal, playful]
+      default: friendly
+      description: Tone for the couplet the poet subagent writes.
+
+output_schema:
+  type: object
+  properties:
+    card:
+      type: text
+      description: The final greeting card assembled by the `formatter` skill.
+    shout:
+      type: string
+      description: The loud version of the name from the `emphasize` tool.
+    poem:
+      type: text
+      description: The two-line couplet the poet subagent wrote.
+
+tools:
+  - name: emphasize
+    description: >
+      Make a short string LOUD — uppercases it and adds emphatic punctuation. A
+      trivial deterministic tool, here purely to show how a skill declares and
+      calls its own Python tool.
+    entrypoint: tools/emphasize.py:run
+    input_schema:
+      type: object
+      required: [text]
+      properties:
+        text:
+          type: string
+          description: The text to emphasize (e.g. the greeting name).
+    output_schema:
+      type: object
+      properties:
+        loud:
+          type: string
+          description: The emphasized text.
+
+# Evals make this skill testable like code. After every live run, each grader
+# scores that run; and an offline SUITE (`puras eval greeter`) runs every case in
+# `evals/cases.jsonl` N times and reports pass-rate / cost / latency / variance —
+# gate a deploy on it. Two grader kinds here, both deterministic and free:
+#   - schema      → the output matches this skill's output_schema (card/shout/poem).
+#   - exact_match → `shout` equals the case's expected value. `shout` comes from
+#                   the deterministic `emphasize` tool, so it's safe to assert
+#                   exactly — if the agent stops calling the tool, the eval fails.
+evals:
+  dataset: evals/cases.jsonl
+  graders:
+    - name: well_formed
+      kind: schema
+      weight: 1
+    - name: correct_shout
+      kind: exact_match
+      field: shout
+      weight: 1
+
+examples:
+  - title: Greet Ada
+    inputs:
+      name: Ada
+      style: playful
+  - title: Greet the team (formal)
+    inputs:
+      name: the Puras team
+      style: formal
