@@ -1,0 +1,119 @@
+# Publish to PyPI on merge to main — the "version-changed" model.
+#
+# This repo ships TWO independent wheels, each with its version pinned by hand in
+# an __init__.py (see pyproject `dynamic = ["version"]`):
+#
+#   puras-runner  ->  worker/__init__.py            (root pyproject.toml)
+#   puras         ->  worker/sdk/puras/__init__.py  (worker/sdk/pyproject.toml)
+#
+# On every push to main each package is checked against PyPI: if its current
+# version is ALREADY published, the leg is a no-op (PyPI is immutable — you can't
+# re-upload a version). If the version is new, the wheel/sdist is built and
+# uploaded. So a release is just "bump the __version__ in your PR" — the merge
+# does the rest, and the two packages move independently.
+#
+# Auth is PyPI Trusted Publishing (OIDC): no token stored in the repo. Each PyPI
+# project must have a trusted publisher pointing at THIS workflow file
+# (publish.yml) under repo PurasAI/puras — see the one-time setup note at the
+# bottom of this file.
+
+name: publish
+
+on:
+  push:
+    branches: [main]
+
+# Don't let two main-pushes publish at once.
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    strategy:
+      # Keep going even if one package's leg fails, so a runner bump still ships
+      # when the SDK leg has an unrelated hiccup (and vice versa).
+      fail-fast: false
+      matrix:
+        include:
+          - pkg: puras-runner
+            dir: .
+            version_file: worker/__init__.py
+          - pkg: puras
+            dir: worker/sdk
+            version_file: worker/sdk/puras/__init__.py
+    permissions:
+      # Required for Trusted Publishing (OIDC). No PyPI token needed.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Read the package version from its __init__.py
+        id: ver
+        run: |
+          VERSION=$(python - "$VERSION_FILE" <<'PY'
+          import re, sys
+          src = open(sys.argv[1], encoding="utf-8").read()
+          m = re.search(r'^__version__\s*=\s*["\']([^"\']+)["\']', src, re.M)
+          if not m:
+              sys.exit(f"no __version__ found in {sys.argv[1]}")
+          print(m.group(1))
+          PY
+          )
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "::notice::${PKG} version is ${VERSION}"
+        env:
+          VERSION_FILE: ${{ matrix.version_file }}
+          PKG: ${{ matrix.pkg }}
+
+      - name: Is this version already on PyPI?
+        id: check
+        run: |
+          # 200 => that exact version exists already (skip). 404 => new project
+          # or new version (publish).
+          CODE=$(curl -s -o /dev/null -w '%{http_code}' \
+            "https://pypi.org/pypi/${PKG}/${VERSION}/json")
+          if [ "$CODE" = "200" ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::${PKG} ${VERSION} already on PyPI — skipping publish"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::${PKG} ${VERSION} is new — will build and publish"
+          fi
+        env:
+          PKG: ${{ matrix.pkg }}
+          VERSION: ${{ steps.ver.outputs.version }}
+
+      - name: Build sdist + wheel
+        if: steps.check.outputs.exists == 'false'
+        working-directory: ${{ matrix.dir }}
+        run: |
+          python -m pip install --upgrade build
+          python -m build --outdir dist .
+
+      - name: Publish to PyPI
+        if: steps.check.outputs.exists == 'false'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: ${{ matrix.dir }}/dist
+          print-hash: true
+
+# ---------------------------------------------------------------------------
+# One-time PyPI setup (per project — do this once, in the PyPI web UI):
+#
+#   For EACH project (`puras-runner` and `puras`):
+#     PyPI -> your project -> Settings -> Publishing -> "Add a pending publisher"
+#     (or, if the project doesn't exist yet, Account -> Publishing -> add a
+#      *pending* publisher so the very first upload can create it), with:
+#         Owner:            PurasAI
+#         Repository:       puras
+#         Workflow name:    publish.yml
+#         Environment:      (leave blank)
+#
+# After that, merging a version bump to main publishes automatically.
+# ---------------------------------------------------------------------------
