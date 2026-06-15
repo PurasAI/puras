@@ -1,8 +1,0 @@
-slug: orchestration-bakeoff
-
-title: Codebreaker
-description: >
-  The agent contestant in the orchestration bake-off — a single Puras skill that
-  plays Wordle through one tool, using the agent loop (not a fixed graph) to read
-  each reply and decide the next move. Pitted against a deterministic LangGraph
-  solver over hundreds of games with a "mischievous host" injecting edge cases.
