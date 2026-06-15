@@ -143,24 +143,31 @@ MAX_SUBAGENT_DEPTH = 5
 _MEDIA_VERBS = {"generate_image", "generate_video", "generate_audio", "transcribe"}
 _PARALLEL_MEDIA_LIMIT = max(1, int(os.getenv("PARALLEL_MEDIA_LIMIT", "4")))
 
-# Built-in tools that need the platform — Postgres (workspace memory), the
-# bucket (drive_url/drive_pull), or the platform API (media generation + web).
-# The open-core line: on a local run (`puras run --local`, ctx.platform_enabled
-# False) these are NOT offered to the model, so it never reaches for a capability
-# that can't exist offline. What stays is the free local surface: text, bash,
-# the file tools, deterministic skill tools, and in-process subagents. Mirrors
-# the LocalRunContext docstring and the run_context open-core switch.
+# Built-in tools that need the platform — the bucket (drive_url/drive_pull) or
+# the platform API (media generation + web). The open-core line: on a local run
+# (`puras run --local`, ctx.platform_enabled False) these are NOT offered to the
+# model, so it never reaches for a capability that can't exist offline. What
+# stays is the free local surface: text, bash, the file tools, deterministic
+# skill tools, in-process subagents — AND workspace memory, which a local run
+# backs with SQLite (see MEMORY_TOOLS / ctx.memory_backend). Mirrors the
+# LocalRunContext docstring and the run_context open-core switch.
 PLATFORM_ONLY_TOOLS = frozenset(
     {
         # media generation (→ /v1/media, billing + fal)
         "generate_image", "generate_video", "generate_audio", "transcribe",
         # web (→ /v1/web search/fetch, and the headless-browser screenshot)
         "web_search", "image_search", "web_fetch", "web_screenshot", "download_url",
-        # workspace shared memory (Postgres)
-        "memory_search", "memory_get", "memory_put", "memory_forget",
         # drive↔bucket helpers (no bucket locally)
         "drive_url", "drive_pull",
     }
+)
+
+# Workspace shared-memory tools. Gated on `ctx.memory_enabled` (not
+# platform_enabled) because they work in BOTH environments: Postgres hosted, a
+# local SQLite file offline. Dropped from the offered list only when memory is
+# turned off entirely.
+MEMORY_TOOLS = frozenset(
+    {"memory_search", "memory_get", "memory_put", "memory_forget"}
 )
 
 # File extensions that mark a drive_path as renderable media, so the job's
@@ -695,7 +702,7 @@ def _check_output_payload(output_schema, value) -> str | None:
 
 
 def _build_tools(
-    skill: LoadedSkill, *, platform_enabled: bool = True
+    skill: LoadedSkill, *, platform_enabled: bool = True, memory_enabled: bool = True
 ) -> tuple[list[dict], bool]:
     """Returns (tools, has_set_output).
 
@@ -703,9 +710,11 @@ def _build_tools(
     input schemas. Output schemas are enforced at dispatch time in run_agent.
 
     `platform_enabled` is the open-core switch: when False (a local run) the
-    platform-only built-ins (memory / media / web / drive-bucket helpers — see
+    platform-only built-ins (media / web / drive-bucket helpers — see
     PLATFORM_ONLY_TOOLS) are dropped from the offered tool list, so the model is
-    never handed a capability that can't exist offline.
+    never handed a capability that can't exist offline. `memory_enabled` gates
+    the workspace-memory tools independently — they work offline (SQLite) so
+    they're dropped only when memory is turned off entirely.
     Every tool gets an auto-injected optional `_label` field so the model
     can attach a short progress label the playground UI surfaces — omitted
     when the call should stay internal.
@@ -745,6 +754,9 @@ def _build_tools(
             continue
         # Local run: hosted-only built-ins are switched off (open-core line).
         if not platform_enabled and spec["name"] in PLATFORM_ONLY_TOOLS:
+            continue
+        # Memory tools are gated separately — available offline via SQLite.
+        if not memory_enabled and spec["name"] in MEMORY_TOOLS:
             continue
         if spec["name"] in by_name:
             dropped.append(spec["name"])  # a skill tried to shadow this built-in
@@ -2188,8 +2200,13 @@ async def run_agent(
         session = ctx.session
 
     tools_by_name: dict[str, LoadedTool] = {t.name: t for t in skill.tools}
-    # Local runs (ctx.platform_enabled False) drop the hosted-only built-ins.
-    tools, has_set_output = _build_tools(skill, platform_enabled=ctx.platform_enabled)
+    # Local runs (ctx.platform_enabled False) drop the hosted-only built-ins;
+    # memory tools follow ctx.memory_enabled (offline = SQLite-backed).
+    tools, has_set_output = _build_tools(
+        skill,
+        platform_enabled=ctx.platform_enabled,
+        memory_enabled=ctx.memory_enabled,
+    )
 
     # System prompt is rendered from `worker_prompt.md` — see that file for
     # the full shape and the named-ref injection points.
@@ -2246,15 +2263,18 @@ async def run_agent(
     # with, so the next run matches. Selective (pinned + entity matches, not the
     # whole store) and best-effort: any failure must never break the run.
     # Subagents (depth>1) inherit the digest via the parent's first message and
-    # share these built-in tools, so we only inject once at the top. Skipped on a
-    # local run — workspace memory is a hosted (Postgres) value-add.
-    if depth == 1 and not skill.is_adhoc and not resumed and ctx.platform_enabled:
+    # share these built-in tools, so we only inject once at the top. Works in
+    # both environments — the backend is Postgres hosted, SQLite on a local run
+    # (ctx.memory_backend). Skipped only when memory is turned off entirely.
+    if depth == 1 and not skill.is_adhoc and not resumed and ctx.memory_enabled:
         try:
-            from .memory_store import memory_context
+            mem_backend = ctx.memory_backend()
+            assert mem_backend is not None
+            mem_mod, mem_handle = mem_backend
 
             identity = derive_identity(staged_inputs, str(workspace_id))
-            mem = await memory_context(
-                session,
+            mem = await mem_mod.memory_context(
+                mem_handle,
                 workspace_id,
                 entity_keys=identity.get("keys"),
                 content_hashes=(
@@ -3072,12 +3092,13 @@ async def run_agent(
             elif tu.name == "memory_search":
                 # Workspace shared-brain lookup. Read-only, hard-scoped to this
                 # workspace; inputs are guarded (no raw cast) so a bad arg never
-                # aborts the session's transaction.
-                from .memory_store import memory_search
+                # aborts the session's transaction. The backend is Postgres
+                # hosted, SQLite on a local run (ctx.memory_backend).
+                mem_mod, mem_handle = ctx.memory_backend()
 
                 args = tu.input if isinstance(tu.input, dict) else {}
-                rows = await memory_search(
-                    session,
+                rows = await mem_mod.memory_search(
+                    mem_handle,
                     workspace_id,
                     kind=args.get("kind"),
                     entity_key=args.get("key"),
@@ -3106,7 +3127,7 @@ async def run_agent(
                     },
                 )
             elif tu.name == "memory_get":
-                from .memory_store import memory_get
+                mem_mod, mem_handle = ctx.memory_backend()
 
                 args = tu.input if isinstance(tu.input, dict) else {}
                 raw_id = args.get("id")
@@ -3118,7 +3139,7 @@ async def run_agent(
                     content = "ERROR: memory_get requires a valid `id` (uuid)"
                     ok = False
                 else:
-                    rec = await memory_get(session, workspace_id, raw_id)
+                    rec = await mem_mod.memory_get(mem_handle, workspace_id, raw_id)
                     if rec is None:
                         content = "ERROR: no memory record with that id in this workspace"
                         ok = False
@@ -3133,7 +3154,7 @@ async def run_agent(
                     },
                 )
             elif tu.name == "memory_put":
-                from .memory_store import memory_put
+                mem_mod, mem_handle = ctx.memory_backend()
 
                 args = tu.input if isinstance(tu.input, dict) else {}
                 record = _coerce_json_arg(args.get("record"))
@@ -3168,8 +3189,8 @@ async def run_agent(
                     importance = args.get("importance")
                     if not isinstance(importance, (int, float)):
                         importance = None
-                    res = await memory_put(
-                        session,
+                    res = await mem_mod.memory_put(
+                        mem_handle,
                         workspace_id,
                         kind=kind.strip(),
                         record=record,
@@ -3204,7 +3225,7 @@ async def run_agent(
                     },
                 )
             elif tu.name == "memory_forget":
-                from .memory_store import memory_forget
+                mem_mod, mem_handle = ctx.memory_backend()
 
                 args = tu.input if isinstance(tu.input, dict) else {}
                 ok = True
@@ -3214,8 +3235,8 @@ async def run_agent(
                     content = "ERROR: memory_forget requires a valid `id` (uuid)"
                     ok = False
                 else:
-                    forgotten = await memory_forget(
-                        session,
+                    forgotten = await mem_mod.memory_forget(
+                        mem_handle,
                         workspace_id,
                         forget_id,
                         reason=(args.get("reason") or None),
