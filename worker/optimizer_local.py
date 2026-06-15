@@ -193,8 +193,9 @@ def _build_artifact(
     base = scored[seed.id][1]
     win = scored[winner.id][1]
     patch: dict[str, Any] = {}
+    # Keys match what the user edits in skill.yaml (`text_model:` / `routing:`).
     if winner.model is not None and winner.model != seed.model:
-        patch["model"] = winner.model
+        patch["text_model"] = winner.model
     if winner.routing is not None:
         patch["routing"] = winner.routing
     return {
