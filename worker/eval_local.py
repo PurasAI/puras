@@ -65,6 +65,7 @@ def run_eval_local(
     case_ids: list[str] | None = None,
     repeat: int = 1,
     threshold: int | None = None,
+    overlay: dict[str, Any] | None = None,
     on_event: Callable[[str, dict], None] | None = None,
 ) -> dict[str, Any]:
     """Run a skill's eval suite offline and return an aggregate report:
@@ -90,7 +91,7 @@ def run_eval_local(
     from .eval_runner import run_evals
     from .manifest import ManifestError, parse_bundle_dir
     from .run_context import LocalRunContext
-    from .skill_loader import load as load_skill
+    from .skill_loader import apply_prompt_override, load as load_skill
     from .workdir import attach_skill, cleanup_workdir, create_workdir
 
     setup_drive()
@@ -101,6 +102,10 @@ def run_eval_local(
         raise LocalRunError(f"invalid bundle: {e}") from e
     deployment = ResolvedDeployment(root=root, manifest=manifest, deployment_id=None)
     loaded = load_skill(manifest, root, _pick_skill(manifest, skill))
+    # Optimizer candidate injection (local mirror of jobs.prompt_override): swap the
+    # candidate's prompt / model / routing onto the skill so a candidate is scored
+    # offline against the same tool code + dataset. None = score the skill as-is.
+    loaded = apply_prompt_override(loaded, overlay)
 
     if not loaded.is_agentic:
         raise LocalRunError(f"`{loaded.name}` is a deterministic skill — no agent eval")
