@@ -1,1 +1,4 @@
 langgraph>=0.2
+# For the ReAct agent contestant (react_solver.py) — the agentic LangGraph side.
+langchain>=0.3
+langchain-anthropic>=0.2
