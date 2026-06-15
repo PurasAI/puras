@@ -52,16 +52,18 @@ def main(argv=None):
     out = {"args": vars(args)}
     t0 = time.perf_counter()
 
+    from contestants.shared import usd
+
     if args.only != "langgraph":
         from contestants.puras_skill.runner import run_puras_session
-        ps, pc, pe = run_puras_session(briefs, model=args.puras_model)
-        out["puras"] = {"scores": ps, "cost_usd": round(pc / 1e6, 4), "error": pe,
-                        "mean": round(sum(ps) / len(ps), 3)}
+        ps, pin, pout, pe = run_puras_session(briefs, model=args.puras_model)
+        out["puras"] = {"scores": ps, "cost_usd": round(usd(pin, pout), 4), "error": pe,
+                        "tokens": [pin, pout], "mean": round(sum(ps) / len(ps), 3)}
     if args.only != "puras":
         from contestants.langgraph_agent import run_langgraph_session
-        ls, lc, le = run_langgraph_session(briefs, model=args.lg_model)
-        out["langgraph"] = {"scores": ls, "cost_usd": round(lc / 1e6, 4), "error": le,
-                            "mean": round(sum(ls) / len(ls), 3)}
+        ls, lin, lout, le = run_langgraph_session(briefs, model=args.lg_model)
+        out["langgraph"] = {"scores": ls, "cost_usd": round(usd(lin, lout), 4), "error": le,
+                            "tokens": [lin, lout], "mean": round(sum(ls) / len(ls), 3)}
 
     print("\nPicky-Client head-to-head  (score = fraction of the client's rules satisfied)")
     print("=" * 72)

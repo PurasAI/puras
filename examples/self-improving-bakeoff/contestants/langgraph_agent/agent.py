@@ -24,7 +24,8 @@ def run_langgraph_session(
     instructions: str = BASE_INSTRUCTIONS,
 ):
     """Run one contestant session over a list of briefs. Returns
-    (scores_per_round, total_cost_micros, error_or_None)."""
+    (scores_per_round, tok_in, tok_out, error_or_None) — raw tokens so cost can be
+    computed on the SAME pricing basis as the Puras side (apples-to-apples)."""
     import json as _json
 
     from langchain_anthropic import ChatAnthropic
@@ -37,7 +38,7 @@ def run_langgraph_session(
     llm = ChatAnthropic(model=model, temperature=0, max_tokens=1024)
 
     scores: list[float] = []
-    cost_micros = 0
+    tok_in = tok_out = 0
     error = None
 
     for i, brief in enumerate(briefs):
@@ -73,10 +74,11 @@ def run_langgraph_session(
             )
             for m in result.get("messages", []):
                 um = getattr(m, "usage_metadata", None) or {}
-                cost_micros += um.get("input_tokens", 0) * 1 + um.get("output_tokens", 0) * 5
+                tok_in += um.get("input_tokens", 0)
+                tok_out += um.get("output_tokens", 0)
         except Exception as exc:  # noqa: BLE001
             error = f"{type(exc).__name__}: {exc}"
 
         scores.append(round_state["score"])
 
-    return scores, cost_micros, error
+    return scores, tok_in, tok_out, error

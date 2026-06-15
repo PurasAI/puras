@@ -15,6 +15,16 @@ from __future__ import annotations
 
 from task import Brief
 
+# Shared pricing so both contestants' cost is computed identically (apples-to-apples).
+# Claude Haiku 4.5 published rate: $1 / Mtok input, $5 / Mtok output. Both sides run
+# Haiku, so the cost RATIO is exact regardless of the absolute rate.
+HAIKU_USD_PER_MTOK_IN = 1.0
+HAIKU_USD_PER_MTOK_OUT = 5.0
+
+
+def usd(tok_in: int, tok_out: int) -> float:
+    return (tok_in * HAIKU_USD_PER_MTOK_IN + tok_out * HAIKU_USD_PER_MTOK_OUT) / 1_000_000
+
 # Base instructions — deliberately do NOT reveal the rulebook. This is the prompt
 # the optimizer will iterate (for the Puras side only). Kept identical across
 # contestants at the start so the curves are comparable.

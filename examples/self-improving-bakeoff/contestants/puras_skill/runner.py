@@ -57,14 +57,15 @@ _FINISH = (
 
 def run_puras_session(briefs, *, model: str | None = None, instructions: str | None = None,
                       details: bool = False):
-    """Run the skill over briefs. Returns (scores_per_round, cost_micros, error), or
-    (..., rounds_detail) when details=True — rounds_detail[i] = {score, broken_rules}."""
+    """Run the skill over briefs. Returns (scores_per_round, tok_in, tok_out, error),
+    or (..., rounds_detail) when details=True — rounds_detail[i] = {score, broken_rules}.
+    Raw tokens let cost be computed on the SAME basis as the LangGraph side."""
     _ensure_paths()
     from worker.local_run import run_local
 
     pack, tmp = _skillpack_with_prompt(instructions)
     sess = Path(tempfile.mkdtemp(prefix="picky-sess-"))
-    cost_micros = 0
+    tok_in = tok_out = 0
     error = None
     try:
         for i, b in enumerate(briefs):
@@ -76,7 +77,9 @@ def run_puras_session(briefs, *, model: str | None = None, instructions: str | N
                     skill="picky-copywriter", model=model,
                     on_event=lambda *a, **k: None,
                 )
-                cost_micros += (res.get("usage") or {}).get("cost_micros", 0)
+                usage = res.get("usage") or {}
+                tok_in += usage.get("input_tokens", 0)
+                tok_out += usage.get("output_tokens", 0)
             except Exception as exc:  # noqa: BLE001
                 error = f"{type(exc).__name__}: {exc}"
         state = json.loads((sess / "state.json").read_text()) if (sess / "state.json").exists() else {"rounds": {}}
@@ -88,5 +91,5 @@ def run_puras_session(briefs, *, model: str | None = None, instructions: str | N
         if tmp:
             shutil.rmtree(tmp, ignore_errors=True)
     if details:
-        return scores, cost_micros, error, rounds
-    return scores, cost_micros, error
+        return scores, tok_in, tok_out, error, rounds
+    return scores, tok_in, tok_out, error

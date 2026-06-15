@@ -52,14 +52,15 @@ Output ONLY the new prompt text, nothing else."""
 
 
 def _reward(instructions: str, briefs, contestant_model: str):
-    scores, cost, err, rounds = run_puras_session(
+    from contestants.shared import usd
+    scores, tin, tout, err, rounds = run_puras_session(
         briefs, model=contestant_model, instructions=instructions, details=True)
     mean = sum(scores) / len(scores) if scores else 0.0
     fails = collections.Counter()
     for r in rounds:
         for fb in r.get("broken_rules", []):
             fails[fb] += 1
-    return mean, cost / 1e6, fails, err
+    return mean, usd(tin, tout), fails, err
 
 
 def _propose(current: str, mean: float, fails, optimizer_model: str) -> str:
