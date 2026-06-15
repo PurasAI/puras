@@ -9,6 +9,7 @@ from __future__ import annotations
 import getpass
 import io
 import json
+import os
 import re
 import sys
 import time
@@ -412,6 +413,8 @@ def _run_local(args) -> None:
     bundle_dir = args.dir or "."
     api_key = _resolve_llm_key(args)
     info(f"running `{args.skill or '(sole skill)'}` from {bundle_dir} — offline, your key")
+    if os.environ.get("FAL_KEY"):
+        info(dim("  FAL_KEY set — generate_image/video/audio call Fal directly (your key)"))
     try:
         res = run_local(
             bundle_dir, inputs,

@@ -695,7 +695,7 @@ def _check_output_payload(output_schema, value) -> str | None:
 
 
 def _build_tools(
-    skill: LoadedSkill, *, platform_enabled: bool = True
+    skill: LoadedSkill, *, platform_enabled: bool = True, media_enabled: bool = False
 ) -> tuple[list[dict], bool]:
     """Returns (tools, has_set_output).
 
@@ -705,7 +705,9 @@ def _build_tools(
     `platform_enabled` is the open-core switch: when False (a local run) the
     platform-only built-ins (memory / media / web / drive-bucket helpers — see
     PLATFORM_ONLY_TOOLS) are dropped from the offered tool list, so the model is
-    never handed a capability that can't exist offline.
+    never handed a capability that can't exist offline. `media_enabled` is the
+    one exception: a local run with a Fal key calls Fal directly (BYO key), so
+    the media generate_* verbs stay on even though the platform is off.
     Every tool gets an auto-injected optional `_label` field so the model
     can attach a short progress label the playground UI surfaces — omitted
     when the call should stay internal.
@@ -743,9 +745,13 @@ def _build_tools(
     for spec in BUILTIN_AGENT_TOOLS:
         if spec["name"] == "bash" and skill.disable_bash:
             continue
-        # Local run: hosted-only built-ins are switched off (open-core line).
+        # Local run: hosted-only built-ins are switched off (open-core line),
+        # except the media generate_* verbs when a Fal key re-enables them.
         if not platform_enabled and spec["name"] in PLATFORM_ONLY_TOOLS:
-            continue
+            if media_enabled and spec["name"] in _MEDIA_VERBS:
+                pass
+            else:
+                continue
         if spec["name"] in by_name:
             dropped.append(spec["name"])  # a skill tried to shadow this built-in
         by_name[spec["name"]] = _inject_label_field(spec)
@@ -896,6 +902,65 @@ def _persist_url_to_drive(url: str, workspace_id: str, drive_path: str) -> None:
                 for chunk in resp.iter_bytes():
                     f.write(chunk)
     os.replace(tmp, dest)
+
+
+def _local_media_enabled(ctx) -> bool:
+    """A local run (`platform_enabled` False) calls Fal directly when FAL_KEY is
+    set — the BYO-key media path. Hosted (`platform_enabled` True) always goes
+    through the API, so this is only ever True offline."""
+    if getattr(ctx, "platform_enabled", True):
+        return False
+    try:
+        return bool(get_settings().fal_key)
+    except Exception:
+        return False
+
+
+def _call_media_local(
+    model: str,
+    inputs: dict,
+    workspace_id: str,
+    job_id: str,
+    *,
+    verb: str | None = None,
+    output_path: str | None = None,
+    output_dir: str | None = None,
+    output_url_path: str | None = None,
+    kind: str = "auto",
+) -> dict:
+    """Local counterpart to `_call_media`: generate against Fal directly (no
+    platform API, no billing) and stream the output onto the local drive. Same
+    return contract as `_call_media` — `{ok, model, kind, drive_path, meta, …}`
+    — so the dispatcher treats both paths identically. There's no bucket offline,
+    so we skip the bucket push (the local drive IS the store)."""
+    from . import media_local
+    from .media_verbs import VerbError
+
+    try:
+        data = media_local.generate(
+            model,
+            inputs or {},
+            workspace_id,
+            job_id,
+            verb=verb,
+            output_path=output_path,
+            output_dir=output_dir,
+            output_url_path=output_url_path,
+            kind=kind,
+        )
+    except media_local.LocalMediaError as e:
+        return {"ok": False, "error": str(e)}
+    except VerbError as e:
+        return {"ok": False, "error": str(e)}
+
+    out_url = data.pop("output_url", None)
+    drive_path = data.get("drive_path")
+    if out_url and drive_path:
+        try:
+            _persist_url_to_drive(out_url, workspace_id, drive_path)
+        except Exception as e:
+            return {"ok": False, "error": f"failed to save media to drive: {e}"}
+    return {"ok": True, **data}
 
 
 # /v1/subagent/invoke caps body.timeout at 1800s (api schemas — the long-poll
@@ -2188,8 +2253,13 @@ async def run_agent(
         session = ctx.session
 
     tools_by_name: dict[str, LoadedTool] = {t.name: t for t in skill.tools}
-    # Local runs (ctx.platform_enabled False) drop the hosted-only built-ins.
-    tools, has_set_output = _build_tools(skill, platform_enabled=ctx.platform_enabled)
+    # Local runs (ctx.platform_enabled False) drop the hosted-only built-ins —
+    # but a local run with a Fal key keeps the media generate_* verbs (BYO key).
+    tools, has_set_output = _build_tools(
+        skill,
+        platform_enabled=ctx.platform_enabled,
+        media_enabled=_local_media_enabled(ctx),
+    )
 
     # System prompt is rendered from `worker_prompt.md` — see that file for
     # the full shape and the named-ref injection points.
@@ -2389,8 +2459,11 @@ async def run_agent(
         op = args.get("output_path")
         if isinstance(op, str) and op.startswith("drive/"):
             op = op[len("drive/"):]
+        # Local run with a Fal key: call Fal directly (BYO key, no platform).
+        # Hosted always goes through the API (_call_media).
+        media_fn = _call_media_local if _local_media_enabled(ctx) else _call_media
         out = await asyncio.to_thread(
-            _call_media,
+            media_fn,
             media_slug,
             media_inputs if isinstance(media_inputs, dict) else {},
             str(workspace_id),

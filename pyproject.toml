@@ -44,6 +44,13 @@ dependencies = [
   "pyyaml>=6.0,<7",
 ]
 
+[project.optional-dependencies]
+# `pip install puras-runner[media]` adds the Fal client so a local run with a
+# FAL_KEY set can drive the media generate_* verbs directly (BYO key). Kept
+# optional — a local run without media needs none of it (and the offline import
+# path stays light: `fal_client` is imported lazily, only when a verb fires).
+media = ["fal-client>=0.4"]
+
 [tool.hatch.version]
 path = "worker/__init__.py"
 

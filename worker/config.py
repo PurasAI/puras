@@ -93,6 +93,16 @@ class WorkerSettings(BaseSettings):
     # require_service_token. Unset = use the static PURAS_SERVICE_TOKEN.
     service_token_file: str | None = Field(None, alias="PURAS_SERVICE_TOKEN_FILE")
 
+    # --- Direct Fal media key (OPTIONAL — local mode only) ---
+    # Hosted runs generate media through the platform API (/v1/media/generate),
+    # which owns the Fal key + billing. A local run (`puras run --local` /
+    # `puras serve`, platform_enabled=False) has no API — so the media generate_*
+    # verbs are normally switched off. Set FAL_KEY and a local run calls Fal
+    # DIRECTLY instead (BYO key, like the BYO LLM key), re-enabling
+    # generate_image / generate_video / generate_audio / transcribe with no
+    # platform, no billing. Unset = the verbs stay off locally.
+    fal_key: str = Field("", alias="FAL_KEY")
+
     # --- Confirmation gates / human-in-the-loop (P1-5) ---
     # A `confirm: true` tool pauses the run for a human approve/deny decision.
     # The worker polls for the decision this often, up to this timeout — after
