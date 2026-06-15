@@ -17,7 +17,7 @@ from worker import agent_runner as ar
 from worker.eval_mocks import SIDE_EFFECTING, merge_mocks, mock_tool
 from worker.eval_local import parse_cases_jsonl, run_eval_local
 from worker.local_run import LocalRunError
-from worker.manifest import ManifestError, _parse_eval_mocks
+from worker.manifest import ManifestError, _parse_eval_gate, _parse_eval_mocks
 from worker.providers.base import NormalizedResponse, NormalizedToolUse
 
 
@@ -94,6 +94,32 @@ def test_parse_cases_jsonl_per_case_mocks():
 def test_parse_cases_jsonl_rejects_non_dict_mocks():
     with pytest.raises(LocalRunError, match="`mocks` must be a mapping"):
         parse_cases_jsonl('{"id": "a", "inputs": {}, "mocks": [1]}\n')
+
+
+# ── manifest: evals.gate (deploy gate) ───────────────────────────────────────
+def test_parse_eval_gate_ok():
+    data = {"evals": {"dataset": "evals/c.jsonl", "gate": {"threshold": 80}}}
+    assert _parse_eval_gate("s", data, is_agentic=True) == {"threshold": 80, "repeat": 1}
+    data = {"evals": {"dataset": "evals/c.jsonl", "gate": {"threshold": 90, "repeat": 3}}}
+    assert _parse_eval_gate("s", data, is_agentic=True) == {"threshold": 90, "repeat": 3}
+    # No gate → None (deploy activates immediately, as before).
+    assert _parse_eval_gate("s", {"evals": {"dataset": "x.jsonl"}}, is_agentic=True) is None
+    assert _parse_eval_gate("s", {}, is_agentic=True) is None
+
+
+def test_parse_eval_gate_rejects_bad_values():
+    base = {"dataset": "evals/c.jsonl"}
+    with pytest.raises(ManifestError, match="threshold` must be a number"):
+        _parse_eval_gate("s", {"evals": {**base, "gate": {}}}, is_agentic=True)
+    with pytest.raises(ManifestError, match="between 0 and 100"):
+        _parse_eval_gate("s", {"evals": {**base, "gate": {"threshold": 150}}}, is_agentic=True)
+    with pytest.raises(ManifestError, match="repeat` must be an integer"):
+        _parse_eval_gate("s", {"evals": {**base, "gate": {"threshold": 80, "repeat": 0}}}, is_agentic=True)
+    # A gate with no dataset can't run → rejected.
+    with pytest.raises(ManifestError, match="needs an `evals.dataset`"):
+        _parse_eval_gate("s", {"evals": {"gate": {"threshold": 80}}}, is_agentic=True)
+    with pytest.raises(ManifestError, match="only applies to agentic"):
+        _parse_eval_gate("s", {"evals": {**base, "gate": {"threshold": 80}}}, is_agentic=False)
 
 
 # ── end-to-end: suite mode short-circuits a side-effecting tool ──────────────

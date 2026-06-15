@@ -241,6 +241,11 @@ class SkillDecl:
     # verbs get a safe default stub even with no entry; an entry overrides it and
     # is the only way to mock a custom tool. {} = none. See `worker.eval_mocks`.
     eval_mocks: dict[str, Any] = field(default_factory=dict)
+    # Optional deploy gate (skill.yaml `evals.gate` — `{threshold, repeat?}`): when
+    # set, a hosted deploy of this skill is NOT activated until its eval suite
+    # passes (pass-rate ≥ threshold) against the new version. None = no gate. See
+    # `_parse_eval_gate`.
+    eval_gate: dict[str, Any] | None = None
     # Optional model routing/escalation (skill.yaml `routing:`, agentic only): run
     # on the cheap `text_model` by default and switch to a premium model when the
     # cheap one can't deliver (e.g. repeated set_output schema failures). Shape:
@@ -294,6 +299,7 @@ class SkillDecl:
             "evals": [e.to_dict() for e in self.evals],
             "eval_dataset": self.eval_dataset,
             "eval_mocks": self.eval_mocks,
+            "eval_gate": self.eval_gate,
             "routing": self.routing,
             "allowed_tools": self.allowed_tools,
             "tool_limits": self.tool_limits,
@@ -643,6 +649,7 @@ def _build_decl(slug: str, path: str, data: Any) -> SkillDecl:
     evals = _parse_evals(slug, data, is_agentic)
     eval_dataset = _parse_eval_dataset(slug, data, is_agentic)
     eval_mocks = _parse_eval_mocks(slug, data, is_agentic)
+    eval_gate = _parse_eval_gate(slug, data, is_agentic)
     routing = _parse_routing(slug, data, is_agentic, model)
     marketing = _parse_marketing(slug, data)
     allowed_tools = _parse_allowed_tools(slug, data)
@@ -663,6 +670,7 @@ def _build_decl(slug: str, path: str, data: Any) -> SkillDecl:
         evals=evals,
         eval_dataset=eval_dataset,
         eval_mocks=eval_mocks,
+        eval_gate=eval_gate,
         routing=routing,
         marketing=marketing,
         allowed_tools=allowed_tools,
@@ -959,6 +967,52 @@ def _parse_eval_mocks(slug: str, data: Any, is_agentic: bool) -> dict[str, Any]:
     return out
 
 
+_GATE_MAX_REPEAT = 20
+
+
+def _parse_eval_gate(slug: str, data: Any, is_agentic: bool) -> dict[str, Any] | None:
+    """Parse the optional `evals.gate` block — the deploy gate `{threshold, repeat?}`.
+    When set, a hosted deploy of this skill is NOT activated until its eval suite
+    passes (pass-rate ≥ threshold) against the new version. A gate needs an
+    `evals.dataset`. None = no gate (the deploy activates immediately, as today).
+    Agentic-only."""
+    evals_raw = data.get("evals")
+    if not isinstance(evals_raw, dict):
+        return None
+    gate = evals_raw.get("gate")
+    if gate is None:
+        return None
+    if not is_agentic:
+        raise ManifestError(
+            f"skills/{slug}: `evals.gate` only applies to agentic (.md) skills"
+        )
+    if not isinstance(gate, dict):
+        raise ManifestError(
+            f"skills/{slug}: `evals.gate` must be a mapping with a `threshold`"
+        )
+    threshold = gate.get("threshold")
+    if isinstance(threshold, bool) or not isinstance(threshold, (int, float)):
+        raise ManifestError(
+            f"skills/{slug}: `evals.gate.threshold` must be a number between 0 and 100"
+        )
+    threshold = int(threshold)
+    if threshold < 0 or threshold > 100:
+        raise ManifestError(
+            f"skills/{slug}: `evals.gate.threshold` must be between 0 and 100"
+        )
+    repeat = gate.get("repeat", 1)
+    if isinstance(repeat, bool) or not isinstance(repeat, int) or repeat < 1 or repeat > _GATE_MAX_REPEAT:
+        raise ManifestError(
+            f"skills/{slug}: `evals.gate.repeat` must be an integer between 1 and {_GATE_MAX_REPEAT}"
+        )
+    if not evals_raw.get("dataset"):
+        raise ManifestError(
+            f"skills/{slug}: `evals.gate` needs an `evals.dataset` of cases to run "
+            f"the gate suite against"
+        )
+    return {"threshold": threshold, "repeat": repeat}
+
+
 def _parse_marketing(slug: str, data: Any) -> dict[str, Any] | None:
     """Parse the optional `marketing:` block of a skill.yaml — SEO/landing copy
     for the skill's public page (headline, feature cards, personas, comparison,
@@ -1160,6 +1214,7 @@ def from_stored_dict(d: dict[str, Any]) -> Manifest:
                 evals=evals,
                 eval_dataset=s.get("eval_dataset") if isinstance(s.get("eval_dataset"), str) else None,
                 eval_mocks=s.get("eval_mocks") if isinstance(s.get("eval_mocks"), dict) else {},
+                eval_gate=s.get("eval_gate") if isinstance(s.get("eval_gate"), dict) else None,
                 routing=s.get("routing") if isinstance(s.get("routing"), dict) else None,
                 allowed_tools=s.get("allowed_tools") if isinstance(s.get("allowed_tools"), list) else None,
                 tool_limits=s.get("tool_limits") if isinstance(s.get("tool_limits"), dict) else {},
