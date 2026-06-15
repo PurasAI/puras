@@ -49,6 +49,16 @@ class RunContext(ABC):
     # rather than erroring against an absent platform.
     platform_enabled: bool = True
 
+    # Eval/test ("suite") mode: this run is an eval-suite case, not a live run the
+    # user submitted. When True, the agent loop short-circuits side-effecting tools
+    # with canned stubs (see `eval_mocks`) so a test run never renders media, sends
+    # email, or writes to memory for real. `eval_mocks` is the merged
+    # {tool_name: response} table (skill `evals.mocks` + the case's `mocks`).
+    # Default off — a live run behaves exactly as before. Set by `eval_local` and
+    # the worker's eval-suite job path.
+    suite_mode: bool = False
+    eval_mocks: dict | None = None
+
     @abstractmethod
     async def emit_event(self, event_type: str, payload: dict) -> None: ...
 

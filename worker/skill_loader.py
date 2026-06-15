@@ -94,6 +94,9 @@ class LoadedSkill:
     evals: list[LoadedEval] = field(default_factory=list)
     # Bundle-relative (to the skill dir) path to the offline eval dataset, or None.
     eval_dataset: str | None = None
+    # Eval-time tool mocks `{tool_name: response}` (from `evals.mocks`): consulted
+    # only in suite/test mode to short-circuit side-effecting tools. {} = none.
+    eval_mocks: dict[str, Any] = field(default_factory=dict)
     # Model routing/escalation policy `{escalate_to, on, after}`, or None. The run
     # starts on `model` and switches to `escalate_to` when a trigger fires.
     routing: dict[str, Any] | None = None
@@ -141,6 +144,7 @@ def load(manifest: Manifest, deployment_root: Path, name: str) -> LoadedSkill:
             tools=tools,
             evals=evals,
             eval_dataset=decl.eval_dataset,
+            eval_mocks=dict(decl.eval_mocks or {}),
             routing=decl.routing,
             allowed_tools=decl.allowed_tools,
             tool_limits=decl.tool_limits,

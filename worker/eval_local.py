@@ -43,6 +43,11 @@ def parse_cases_jsonl(text: str) -> list[dict]:
             raise LocalRunError(f"dataset line {n}: invalid JSON ({e})") from None
         if not isinstance(obj, dict) or not isinstance(obj.get("inputs"), dict):
             raise LocalRunError(f"dataset line {n}: each case needs an `inputs` object")
+        case_mocks = obj.get("mocks")
+        if case_mocks is not None and not isinstance(case_mocks, dict):
+            raise LocalRunError(
+                f"dataset line {n}: `mocks` must be a mapping of tool-name → response"
+            )
         cases.append(
             {
                 "id": str(obj.get("id") or f"case-{len(cases) + 1}"),
@@ -50,6 +55,10 @@ def parse_cases_jsonl(text: str) -> list[dict]:
                 "expected": obj.get("expected"),
                 "has_expected": "expected" in obj,
                 "tags": obj.get("tags"),
+                # Per-case tool mocks override the skill-level `evals.mocks` for
+                # this case's suite run (so a case can simulate a specific tool
+                # return). None = use the skill defaults only.
+                "mocks": case_mocks,
             }
         )
     return cases
@@ -87,6 +96,7 @@ def run_eval_local(
     from .agent_runner import run_agent
     from .deployment import ResolvedDeployment, build_skill_python
     from .drive import setup_drive
+    from .eval_mocks import merge_mocks
     from .eval_runner import run_evals
     from .manifest import ManifestError, parse_bundle_dir
     from .run_context import LocalRunContext
@@ -133,6 +143,12 @@ def run_eval_local(
     async def _run_one(case: dict, rep: int) -> dict:
         job_id = uuid.uuid4()
         ctx = LocalRunContext(job_id, workspace_id, on_event=sink)
+        # Suite mode: this is a test run, not a live one — short-circuit
+        # side-effecting tools with stubs (built-in defaults + the skill's
+        # `evals.mocks`, overridden by this case's `mocks`) so the suite never
+        # renders media, sends email, or writes for real.
+        ctx.suite_mode = True
+        ctx.eval_mocks = merge_mocks(loaded.eval_mocks, case.get("mocks"))
         workdir = create_workdir(str(job_id), workspace_id, case["inputs"])
         try:
             attach_skill(workdir, loaded.root)

@@ -234,6 +234,13 @@ class SkillDecl:
     # eval suite (POST /v1/skillpacks/{id}/evals). None = no dataset; the graders
     # still score live runs. See `evals.dataset` in skill.yaml.
     eval_dataset: str | None = None
+    # Optional eval-time tool mocks (skill.yaml `evals.mocks` — `{tool: response}`):
+    # in SUITE/test mode (an eval suite, never a live run) the named tools return
+    # the given canned response instead of really executing, so a test run can't
+    # trigger real side effects (renders, sends, writes). Built-in side-effecting
+    # verbs get a safe default stub even with no entry; an entry overrides it and
+    # is the only way to mock a custom tool. {} = none. See `worker.eval_mocks`.
+    eval_mocks: dict[str, Any] = field(default_factory=dict)
     # Optional model routing/escalation (skill.yaml `routing:`, agentic only): run
     # on the cheap `text_model` by default and switch to a premium model when the
     # cheap one can't deliver (e.g. repeated set_output schema failures). Shape:
@@ -286,6 +293,7 @@ class SkillDecl:
             "examples": [e.to_dict() for e in self.examples],
             "evals": [e.to_dict() for e in self.evals],
             "eval_dataset": self.eval_dataset,
+            "eval_mocks": self.eval_mocks,
             "routing": self.routing,
             "allowed_tools": self.allowed_tools,
             "tool_limits": self.tool_limits,
@@ -634,6 +642,7 @@ def _build_decl(slug: str, path: str, data: Any) -> SkillDecl:
 
     evals = _parse_evals(slug, data, is_agentic)
     eval_dataset = _parse_eval_dataset(slug, data, is_agentic)
+    eval_mocks = _parse_eval_mocks(slug, data, is_agentic)
     routing = _parse_routing(slug, data, is_agentic, model)
     marketing = _parse_marketing(slug, data)
     allowed_tools = _parse_allowed_tools(slug, data)
@@ -653,6 +662,7 @@ def _build_decl(slug: str, path: str, data: Any) -> SkillDecl:
         examples=examples,
         evals=evals,
         eval_dataset=eval_dataset,
+        eval_mocks=eval_mocks,
         routing=routing,
         marketing=marketing,
         allowed_tools=allowed_tools,
@@ -915,6 +925,40 @@ def _parse_eval_dataset(slug: str, data: Any, is_agentic: bool) -> str | None:
     return ds
 
 
+def _parse_eval_mocks(slug: str, data: Any, is_agentic: bool) -> dict[str, Any]:
+    """Parse the optional `evals.mocks` block — a mapping of tool-name → canned
+    response used to short-circuit that tool in SUITE/test mode (so an eval run
+    never triggers a real side effect). Only the mapping form
+    `evals: { mocks: {...}, graders: [...] }` carries it; a bare graders list has
+    none. Each value is the tool-result payload the agent sees in place of really
+    running the tool (e.g. `generate_video: { drive_path: "drive/fixtures/x.mp4" }`).
+    Built-in side-effecting verbs get a safe default stub even without an entry;
+    an entry overrides that default and is the only way to mock a custom tool.
+    Eval-time only — never consulted on a live run."""
+    evals_raw = data.get("evals")
+    if not isinstance(evals_raw, dict):
+        return {}
+    mocks = evals_raw.get("mocks")
+    if mocks is None:
+        return {}
+    if not isinstance(mocks, dict):
+        raise ManifestError(
+            f"skills/{slug}: `evals.mocks` must be a mapping of tool-name → response"
+        )
+    if not is_agentic:
+        raise ManifestError(
+            f"skills/{slug}: `evals.mocks` only applies to agentic (.md) skills"
+        )
+    out: dict[str, Any] = {}
+    for tool_name, spec in mocks.items():
+        if not isinstance(tool_name, str) or not tool_name.strip():
+            raise ManifestError(
+                f"skills/{slug}: `evals.mocks` keys must be non-empty tool names"
+            )
+        out[tool_name.strip()] = spec
+    return out
+
+
 def _parse_marketing(slug: str, data: Any) -> dict[str, Any] | None:
     """Parse the optional `marketing:` block of a skill.yaml — SEO/landing copy
     for the skill's public page (headline, feature cards, personas, comparison,
@@ -1115,6 +1159,7 @@ def from_stored_dict(d: dict[str, Any]) -> Manifest:
                 examples=examples,
                 evals=evals,
                 eval_dataset=s.get("eval_dataset") if isinstance(s.get("eval_dataset"), str) else None,
+                eval_mocks=s.get("eval_mocks") if isinstance(s.get("eval_mocks"), dict) else {},
                 routing=s.get("routing") if isinstance(s.get("routing"), dict) else None,
                 allowed_tools=s.get("allowed_tools") if isinstance(s.get("allowed_tools"), list) else None,
                 tool_limits=s.get("tool_limits") if isinstance(s.get("tool_limits"), dict) else {},

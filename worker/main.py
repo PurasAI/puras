@@ -426,6 +426,11 @@ async def _process_one() -> bool:
                 # out the N-run variance the suite measures (`--repeat`). Normal
                 # runs keep the cache (the step-0 saving is the whole point).
                 use_cache = not bool(job.get("eval_suite_id"))
+                # An eval-suite case runs in suite mode: side-effecting tools are
+                # short-circuited with stubs (built-in defaults + the skill's
+                # `evals.mocks`) so a test run never renders media, sends, or writes
+                # for real. A live run leaves this off and behaves as before.
+                suite_mode = bool(job.get("eval_suite_id"))
                 result = await run_agent(
                     sess, job_id, workspace_id, deployment, skill,
                     inputs, workdir, secrets,
@@ -433,6 +438,8 @@ async def _process_one() -> bool:
                     model_override=model_override,
                     out_dir=out_dir,
                     use_cache=use_cache,
+                    suite_mode=suite_mode,
+                    eval_mocks=getattr(skill, "eval_mocks", None) if suite_mode else None,
                 )
                 # run_agent already enforces output_schema via set_output;
                 # but double-check on the wire just in case. Ad-hoc subagents

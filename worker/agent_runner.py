@@ -49,6 +49,7 @@ from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError
 
 from .agent_tool_specs import BUILTIN_AGENT_TOOLS, set_output_tool_spec
+from .eval_mocks import mock_tool
 from .function_runner import run_function
 from .llm_models import is_known_slug, resolve as resolve_model
 from .run_context import DbRunContext, RunContext
@@ -2131,6 +2132,8 @@ async def run_agent(
     out_dir: str | None = None,
     use_cache: bool = True,
     ctx: RunContext | None = None,
+    suite_mode: bool = False,
+    eval_mocks: dict | None = None,
 ) -> dict[str, Any]:
     s = get_settings()
 
@@ -2186,6 +2189,15 @@ async def run_agent(
         ctx = DbRunContext(session, job_id, workspace_id)
     else:
         session = ctx.session
+    # Eval/test ("suite") mode: a hosted eval-suite case sets this here, so the
+    # dispatch chokepoint short-circuits side-effecting tools with mocks (a test
+    # run must not render media / send / write for real). Only set it when the
+    # caller asked — a caller that pre-armed `ctx` (offline `eval_local`) or a
+    # nested subagent that inherits suite mode through the shared `ctx` passes
+    # `suite_mode=False` and is left untouched.
+    if suite_mode:
+        ctx.suite_mode = True
+        ctx.eval_mocks = eval_mocks
 
     tools_by_name: dict[str, LoadedTool] = {t.name: t for t in skill.tools}
     # Local runs (ctx.platform_enabled False) drop the hosted-only built-ins.
@@ -2686,6 +2698,20 @@ async def run_agent(
                     )
                     await ctx.commit()
                     return content, None
+
+            # Eval/test ("suite") mode: short-circuit side-effecting tools with a
+            # canned stub so a test run never triggers a real side effect (renders,
+            # sends, writes). `mock_tool` returns the result CONTENT, or None to let
+            # the tool run for real (pure/local built-ins, un-mocked custom tools).
+            # set_output is run infrastructure — never mocked (it ends the run).
+            if tu.name != "set_output" and getattr(ctx, "suite_mode", False):
+                mocked = mock_tool(tu.name, tu.input, getattr(ctx, "eval_mocks", None))
+                if mocked is not None:
+                    await ctx.emit_event("tool_result",
+                        {"tool_use_id": tu.id, "ok": True, "preview": mocked[:512], "mock": True},
+                    )
+                    await ctx.commit()
+                    return mocked, None
 
             if tu.name == "set_output":
                 _so = (

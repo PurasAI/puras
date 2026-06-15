@@ -102,6 +102,15 @@ puras eval --local content-repurposer --dir ./examples/content-studio --threshol
 grader runs on your BYO key. `--threshold N` is a CI gate — non-zero exit if the
 pass-rate is below `N`.
 
+A suite runs in **suite mode**: the agent's side-effecting tools are
+short-circuited with stubs, so testing a skill never renders media, sends email,
+or writes for real. Built-in side-effecting verbs (`generate_image`/`video`/
+`audio`, `transcribe`, `web_*`, `download_url`, `send_email`, `memory_put`/
+`forget`) get a safe default stub; declare `evals.mocks: { <tool>: <response> }`
+in `skill.yaml` to feed a realistic value or to mock a **custom** tool, and a
+dataset case may carry its own `mocks: {...}` to override per case. Pure/local
+tools (`bash`, `file_*`, `todo_write`) always run for real.
+
 ## Build your app against a local API
 
 `puras run --local` answers *"does my skill work?"*. When you're building the
