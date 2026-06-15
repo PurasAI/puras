@@ -85,15 +85,21 @@ class AnthropicProvider(Provider):
         ctx_mgmt = _context_management_body()
         extra_headers = {"anthropic-beta": _CONTEXT_MGMT_BETA} if ctx_mgmt else None
         extra_body = {"context_management": ctx_mgmt} if ctx_mgmt else None
-        resp = self._client.messages.create(
+        # Only send `tools` when there is at least one — the Anthropic API rejects
+        # `tools: null` ("Input should be a valid array"). Normal agent turns always
+        # pass real tools, but the optimizer's proposer calls with no tools, so omit
+        # the param entirely rather than forwarding None.
+        create_kwargs = dict(
             model=self.model_id,
             max_tokens=max_tokens,
             system=sys_blocks,
-            tools=cached_tools or None,
             messages=msgs,
             extra_headers=extra_headers,
             extra_body=extra_body,
         )
+        if cached_tools:
+            create_kwargs["tools"] = cached_tools
+        resp = self._client.messages.create(**create_kwargs)
         text_blocks: list[str] = []
         tool_uses: list[NormalizedToolUse] = []
         for block in resp.content:
