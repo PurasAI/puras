@@ -55,6 +55,7 @@ from .run_context import DbRunContext, RunContext
 from .pricing import with_margin
 from .proc_limits import child_preexec
 from .prompt_cache import cached_messages_create
+from .compression import compress_text
 from .providers import make_provider
 from .memory import derive_identity, format_memory_digest
 from .event_ctx import event_ctx
@@ -443,6 +444,84 @@ def _offload_tool_result(
         f"total, first {len(head):,} shown. Full result saved to drive `{rel}` — "
         f"`file_read` it (or `drive_pull` then read it from bash) for the rest.]"
     )
+
+
+def _shrink_tool_result(
+    tu_name: str, tu_id: str, content: Any, job_id: Any, workspace_id: Any
+) -> Any:
+    """Shrink an oversized tool result before it enters the append-only history.
+
+    Two stages, both reversible and cache-safe (deterministic + append-only, so
+    the prompt/KV cache prefix stays aligned — see `worker.compression`):
+
+      1) COMPRESS in place. A content-aware compressor minifies JSON /
+         strips comments / folds repeated log lines, keeping the result USABLE
+         inline rather than dropping it. A LOSSY pass first persists the exact
+         original to the drive and appends a `file_read` pointer, so the model
+         can still recover the byte-exact output on demand (CCR retrieval). A
+         LOSSLESS pass (JSON minify, ANSI/whitespace cleanup) is adopted as-is —
+         no backup needed.
+      2) OFFLOAD as a hard cap. If the (now-compressed) text is still over the
+         offload limit, fall back to head + a `file_read` pointer to the full
+         ORIGINAL — the same "drop the page, keep the URL" behavior as before,
+         just on a denser head.
+
+    Delegates to `_offload_tool_result` (the pure-offload primitive) whenever
+    compression is disabled, the result is too small / non-text, or compression
+    wasn't worthwhile — so that legacy path is byte-for-byte unchanged. Never
+    grows a result and never loses data it can't restore.
+    """
+    s = get_settings()
+    if (
+        not getattr(s, "tool_result_compress_enabled", False)
+        or not isinstance(content, str)
+        or len(content) < getattr(s, "tool_result_compress_min_chars", 2000)
+    ):
+        return _offload_tool_result(tu_name, tu_id, content, job_id, workspace_id)
+
+    res = compress_text(content)
+    if not res.applied or res.ratio < getattr(s, "tool_result_compress_min_ratio", 0.2):
+        # Compression didn't help enough — let the legacy offload decide.
+        return _offload_tool_result(tu_name, tu_id, content, job_id, workspace_id)
+
+    original = content
+    safe_id = re.sub(r"[^A-Za-z0-9_.-]", "_", str(tu_id))[:80] or "tool"
+    rel = f"_jobs/{job_id}/_toolout/{safe_id}.txt"
+    state = {"written": False}
+
+    def _persist_original() -> bool:
+        if state["written"]:
+            return True
+        state["written"] = _run_file_write(rel, original, str(workspace_id)).get("ok", False)
+        return state["written"]
+
+    text = content
+    if res.lossless:
+        # Information-equivalent (JSON minify, ANSI/whitespace cleanup) — adopt
+        # the compressed form silently, no backup or pointer needed.
+        text = res.text
+    elif _persist_original():
+        # Lossy but the exact original is now retrievable — adopt + point to it.
+        text = (
+            f"{res.text}\n\n"
+            f"…[{res.kind} tool result compressed "
+            f"{res.original_chars:,}→{res.compressed_chars:,} chars. Full "
+            f"uncompressed original saved to drive `{rel}` — `file_read` it for "
+            f"the byte-exact output.]"
+        )
+    # else: couldn't back up the original → keep `text` == original (never lose data).
+
+    # Hard cap: if still oversized, drop to head + pointer to the full original.
+    limit = s.tool_result_offload_chars
+    if limit > 0 and len(text) > limit and _persist_original():
+        head = text[: max(0, s.tool_result_offload_head_chars)]
+        text = (
+            f"{head}\n\n"
+            f"…[{tu_name} result truncated for context economy: {len(original):,} chars "
+            f"total. Full result saved to drive `{rel}` — `file_read` it (or "
+            f"`drive_pull` then read it from bash) for the rest.]"
+        )
+    return text
 
 
 def _match_line_numbers(text: str, sub: str, limit: int = 6) -> list[int]:
@@ -3664,12 +3743,13 @@ async def run_agent(
                 _results.append(await _safe_dispatch(tu, ctx))
 
         for tu, (content, _so) in zip(tool_uses, _results):
-            # Offload oversized results to the drive before they enter history,
-            # so the agent doesn't re-read a full fetched page / long stdout on
-            # every subsequent turn (token economy / P1). No-op for small or
-            # multimodal results; cache-safe because it's append-only.
+            # Compress, then offload, before the result enters history,
+            # so the agent doesn't re-read a full fetched page / long stdout / big
+            # JSON on every subsequent turn (token economy / P1). No-op for small
+            # or multimodal results; cache-safe because it's append-only, and
+            # reversible because a lossy shrink leaves a `file_read` pointer.
             content = await asyncio.to_thread(
-                _offload_tool_result, tu.name, tu.id, content, job_id, workspace_id
+                _shrink_tool_result, tu.name, tu.id, content, job_id, workspace_id
             )
             tool_results.append(
                 {"type": "tool_result", "tool_use_id": tu.id, "content": content}
