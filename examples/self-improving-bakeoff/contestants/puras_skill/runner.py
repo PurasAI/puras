@@ -55,8 +55,10 @@ _FINISH = (
 )
 
 
-def run_puras_session(briefs, *, model: str | None = None, instructions: str | None = None):
-    """Run the skill over briefs. Returns (scores_per_round, cost_micros, error)."""
+def run_puras_session(briefs, *, model: str | None = None, instructions: str | None = None,
+                      details: bool = False):
+    """Run the skill over briefs. Returns (scores_per_round, cost_micros, error), or
+    (..., rounds_detail) when details=True — rounds_detail[i] = {score, broken_rules}."""
     _ensure_paths()
     from worker.local_run import run_local
 
@@ -78,9 +80,13 @@ def run_puras_session(briefs, *, model: str | None = None, instructions: str | N
             except Exception as exc:  # noqa: BLE001
                 error = f"{type(exc).__name__}: {exc}"
         state = json.loads((sess / "state.json").read_text()) if (sess / "state.json").exists() else {"rounds": {}}
-        scores = [state["rounds"].get(str(i), {}).get("score", 0.0) for i in range(len(briefs))]
+        rounds = [state["rounds"].get(str(i), {"score": 0.0, "broken_rules": []})
+                  for i in range(len(briefs))]
+        scores = [r.get("score", 0.0) for r in rounds]
     finally:
         shutil.rmtree(sess, ignore_errors=True)
         if tmp:
             shutil.rmtree(tmp, ignore_errors=True)
+    if details:
+        return scores, cost_micros, error, rounds
     return scores, cost_micros, error

@@ -26,7 +26,7 @@ def run(copy: str) -> dict:
     state = json.loads(state_file.read_text()) if state_file.exists() else {"rounds": {}}
     ri = str(spec["round_index"])
     if ri not in state["rounds"]:  # first submission this round is the scored one
-        state["rounds"][ri] = {"score": score, "copy": copy}
+        state["rounds"][ri] = {"score": score, "copy": copy, "broken_rules": failed}
     state_file.write_text(json.dumps(state))
 
     return {"score": round(score, 3), "broken_rules": failed, "perfect": not failed}
