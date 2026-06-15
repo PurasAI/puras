@@ -16,7 +16,7 @@ subprocess runner can import them.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -161,6 +161,29 @@ def load(manifest: Manifest, deployment_root: Path, name: str) -> LoadedSkill:
         py_module=_file_to_module(decl.path, m.group("file")),
         py_func=m.group("func"),
     )
+
+
+def apply_prompt_override(loaded: LoadedSkill, override: dict[str, Any] | None) -> LoadedSkill:
+    """Return a copy of `loaded` with the optimizer's candidate prompt/model/routing
+    swapped in (the candidate-injection seam).
+
+    Override shape: `{system_prompt?, model?, routing?}`. A key that is PRESENT is
+    applied (None clears it — e.g. `routing: None` disables escalation); a key that
+    is ABSENT keeps the skill's deployed value. Only agentic skills are overridable;
+    a non-agentic or empty/None override returns the skill unchanged.
+    """
+    if not override or not loaded.is_agentic:
+        return loaded
+    changes: dict[str, Any] = {}
+    if "system_prompt" in override:
+        sp = override["system_prompt"]
+        if sp is not None:  # never blank out the prompt — ignore a null body
+            changes["system_prompt"] = str(sp)
+    if "model" in override:
+        changes["model"] = override["model"]
+    if "routing" in override:
+        changes["routing"] = override["routing"]
+    return replace(loaded, **changes) if changes else loaded
 
 
 def load_adhoc(deployment_root: Path, prompt_rel_path: str) -> LoadedSkill:

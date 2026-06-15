@@ -16,7 +16,7 @@ These helpers read the per-job context the worker injects:
     PURAS_JOB_ID            # the current job
 """
 
-__version__ = "0.3.3"
+__version__ = "0.4.0"
 
 from . import drive, inputs, media, subagent  # noqa: F401  — usable as `puras.media.generate_image(...)`
 from .client import Client, JobError, PurasAPIError  # noqa: F401  — external skill calls
