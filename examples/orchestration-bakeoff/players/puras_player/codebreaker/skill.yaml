@@ -1,0 +1,86 @@
+title: Codebreaker
+description: >
+  Plays a game of Wordle end to end. Calls the make_guess tool each turn, reads
+  the host's reply, and reasons its way to the hidden word.
+
+entrypoint: SKILL.md
+text_model: claude/haiku-4-5
+
+# No bash, no file tools needed: this contestant plays purely through the
+# make_guess tool plus its own reasoning. Disabling bash also keeps the match
+# honest — the agent can't shell out to recompute the secret from the seed.
+disable_bash: true
+
+input_schema:
+  type: object
+  required: [seed, config, session_dir]
+  properties:
+    seed:
+      type: integer
+      description: Opaque game id. Identifies which hidden word you're playing.
+    config:
+      type: integer
+      description: Opaque match setting. Passed straight to the tool; not meaningful to you.
+    session_dir:
+      type: string
+      description: Where the tool records the authoritative game state. Pass-through.
+    max_guesses:
+      type: integer
+      default: 6
+      description: How many accepted guesses you get.
+    word_length:
+      type: integer
+      default: 5
+      description: Number of letters in the hidden word.
+
+output_schema:
+  type: object
+  properties:
+    solved:
+      type: boolean
+      description: Whether you found the hidden word within the guess limit.
+    answer:
+      type: string
+      description: Your final/winning guess.
+    guesses_used:
+      type: integer
+      description: How many accepted guesses it took.
+
+tools:
+  - name: make_guess
+    description: >
+      Submit one guess to the host and get its reply. The reply tells you whether
+      the guess was accepted and gives feedback on it. Call it once per guess.
+    entrypoint: tools/make_guess.py:run
+    input_schema:
+      type: object
+      required: [guess]
+      properties:
+        guess:
+          type: string
+          description: Your word guess.
+    output_schema:
+      type: object
+      properties:
+        accepted:
+          type: boolean
+          description: Was the guess admitted? If false, it didn't cost you a guess.
+        feedback:
+          type: string
+          description: The host's reply about this guess.
+        status:
+          type: string
+          description: ongoing, won, or lost.
+        guesses_made:
+          type: integer
+          description: Accepted guesses so far.
+        guesses_left:
+          type: integer
+          description: Accepted guesses remaining.
+
+examples:
+  - title: Play a game
+    inputs:
+      seed: 1
+      config: 0
+      session_dir: /tmp/bakeoff-demo
