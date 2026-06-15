@@ -111,6 +111,11 @@ in `skill.yaml` to feed a realistic value or to mock a **custom** tool, and a
 dataset case may carry its own `mocks: {...}` to override per case. Pure/local
 tools (`bash`, `file_*`, `todo_write`) always run for real.
 
+A skill can also declare `evals.gate: { threshold, repeat? }` to gate its
+activation: on the hosted platform a deploy with a gated skill isn't activated
+until its eval suite passes the threshold (the gate runs in suite mode). The
+declaration is parsed here; enforcement is a hosted-platform feature.
+
 ## Build your app against a local API
 
 `puras run --local` answers *"does my skill work?"*. When you're building the
