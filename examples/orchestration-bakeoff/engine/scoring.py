@@ -27,6 +27,7 @@ class GameResult:
     attempts: int              # accepted + rejected
     perturbed: bool            # did any perturbation fire this game?
     elapsed_s: float = 0.0
+    cost_micros: int = 0       # LLM spend for the agent side; 0 for the algorithm
     error: str | None = None   # player blew up (e.g. a parser exception)
     history: list = field(default_factory=list)
 
@@ -76,4 +77,5 @@ def summarize(results: list[GameResult]) -> dict:
         "avg_guesses_on_win": round(statistics.mean(win_guesses), 2) if win_guesses else None,
         "avg_attempts": round(statistics.mean(r.attempts for r in results), 2),
         "avg_elapsed_s": round(statistics.mean(r.elapsed_s for r in results), 4),
+        "total_cost_usd": round(sum(r.cost_micros for r in results) / 1_000_000, 4),
     }

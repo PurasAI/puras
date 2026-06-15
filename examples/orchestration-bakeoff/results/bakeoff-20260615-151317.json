@@ -1,0 +1,47 @@
+{
+  "args": {
+    "n": 2,
+    "det_n": null,
+    "players": "puras",
+    "configs": "0",
+    "max_guesses": 6,
+    "model": null,
+    "workers": 2,
+    "seed0": 1000
+  },
+  "summary": {
+    "puras-agent": {
+      "0": {
+        "n": 2,
+        "win_rate": 1.0,
+        "errors": 0,
+        "avg_guesses_on_win": 5,
+        "avg_attempts": 5,
+        "avg_elapsed_s": 28.5,
+        "total_cost_usd": 0.0822
+      }
+    }
+  },
+  "games": [
+    {
+      "player": "puras-agent",
+      "seed": 1000,
+      "rate": 0.0,
+      "won": true,
+      "guesses_used": 6,
+      "attempts": 6,
+      "cost_usd": 0.0512,
+      "error": null
+    },
+    {
+      "player": "puras-agent",
+      "seed": 1001,
+      "rate": 0.0,
+      "won": true,
+      "guesses_used": 4,
+      "attempts": 4,
+      "cost_usd": 0.031,
+      "error": null
+    }
+  ]
+}

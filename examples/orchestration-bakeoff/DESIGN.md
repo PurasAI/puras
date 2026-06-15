@@ -3,8 +3,14 @@
 **Puras skill agent'ı** vs **LangGraph deterministik pipeline'ı**, aynı oyunda,
 yüzlerce kez, yan yana.
 
-> Durum: TASARIM (kod yok). Onaylanınca Faz 0'dan başlanır.
-> Hedef branch: `claude/agentic-orchestration-demo-s94k29` (her iki repo).
+> Durum: UYGULANIYOR. Faz 0 (engine) + Faz 1 (iki yarışmacı) + Faz 2 çekirdeği
+> (harness) hazır ve test edil[i]yor. Hedef branch:
+> `claude/agentic-orchestration-demo-s94k29`.
+>
+> **Kararlar (kullanıcı):** oyun = **Wordle**; yerleşim = `puras/examples/`;
+> arayüz = **yalnızca terminal** (web sitesi yok); agent modeli = **haiku**
+> (kalibrasyon). Deterministik taraf saf algoritma (LLM yok), bu yüzden bedava
+> ve hızlı — yüksek N'de koşulur; agent tarafı LLM key harcar — N mütevazı.
 
 ---
 
@@ -256,15 +262,16 @@ referans):
 
 ---
 
-## 9. Çıktı ve görselleştirme (`harness/visualize.py`)
+## 9. Çıktı ve görselleştirme (`harness/run_bakeoff.py`) — yalnızca terminal
 
-- **Yan-yana canlı oynatım** — sol: LangGraph, sağ: Puras. Her turda tahmin,
-  geri bildirim, ve (perturbation tetiklenince) bir "⚡ kural değişti" işareti.
-  İzleyici determinitik tarafın takıldığı, agent'ın toparladığı anı görür.
-- **Robustness eğrisi** — N koşu sonrası win-rate vs perturbation oranı,
-  üç çizgi. Demonun "kanıt" karesi budur.
-- Terminal (rich) + opsiyonel basit web görünümü. Web görünümü gerekirse
-  `purasbackend/frontend`'e küçük bir demo sayfası olarak bağlanabilir.
+Web sitesi **yok** (kullanıcı kararı). Her şey terminalde:
+
+- **Özet tablo** — her (oyuncu, config) hücresi için win%, kazanırken ort.
+  tahmin, ort. attempt, hata sayısı, LLM maliyeti.
+- **ASCII robustness eğrisi** — win-rate vs perturbation oranı, oyuncu başına
+  bir blok. Demonun "kanıt" karesi budur.
+- Sonuçlar `results/`'a JSON olarak yazılır (reprodüksiyon; gitignore).
+- (İleride, opsiyonel) tek bir oyunun yan-yana canlı oynatımı — Faz 3.
 
 ---
 
@@ -281,15 +288,24 @@ referans):
   İleride aynı harness'la "bozuk tool'lu gerçek görev" ikinci bir senaryo olarak
   eklenebilir (taksonomi ve skorlama yeniden kullanılır).
 
-## 11. Açık karar noktaları (uygulamadan önce)
+## 11. Kararlar (çözüldü)
 
-1. **Oyun:** Mastermind mi, Wordle mı, ikisi de mi? (İkisi de aynı engine'e
-   sığar; biriyle başlamak daha hızlı.)
-2. **Repo yerleşimi:** `puras/examples/` (önerilen — runner ve örneklerin evi)
-   mi, yoksa `purasbackend`'de bir demo dizini mi?
-3. **Görselleştirme:** sadece terminal mi, yoksa web sayfası da mı?
-4. **Ölçek:** kalibrasyon için başlangıç N ve model (haiku ile başlayıp
-   sonra sonnet'e mi geçelim?).
+1. **Oyun:** Wordle. ✓
+2. **Repo:** `puras/examples/orchestration-bakeoff/`. ✓
+3. **Arayüz:** yalnızca terminal, web yok. ✓
+4. **Ölçek/model:** agent = haiku (kalibrasyon); deterministik = saf algoritma,
+   LLM yok → bedava, yüksek N. ✓
+
+### Perturbation'ı agent'tan gizleme (§3.7'nin uygulaması)
+
+Naif LangGraph çözücü perturbation'dan habersizdir; adalet için agent da öyle
+olmalı. Ama `make_guess` tool'u host'u sürmek için spec'i bilmek zorunda. Çözüm:
+agent'a yalnızca **iki opak int** verilir — `seed` ve `config`. `config →
+(rate, perturbations)` eşlemesi `engine/experiment.py`'da durur: tool import
+eder, agent asla görmez. İki taraf da aynı (seed, config)'ten oyununu kurar, yani
+birebir aynı gizli kelime + aynı önceden-hesaplanmış perturbation programıyla
+karşılaşır. `disable_bash: true` ile agent seed'den gizli kelimeyi de
+hesaplayamaz.
 
 ## 12. Uygulama planı (fazlar)
 

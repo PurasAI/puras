@@ -35,6 +35,11 @@ Use everything you've learned so far to narrow down the word, and pick a next
 guess that rules out as many possibilities as you can. Keep going until you win
 or run out of guesses.
 
+Always guess a **real, common word** of the right length — invented letter
+strings get rejected and waste your effort. If a guess comes back rejected, it
+wasn't a valid word (or broke some rule the reply states); read the reason and
+choose a different real word.
+
 ## Finishing
 
 When the game ends (`status` is `won` or `lost`), call `set_output` once:
