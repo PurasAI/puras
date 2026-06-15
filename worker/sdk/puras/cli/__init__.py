@@ -36,8 +36,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--version", action="version", version=f"puras {_version()}")
     sub = p.add_subparsers(dest="cmd", metavar="<command>")
 
-    def add(name: str, fn, help: str) -> argparse.ArgumentParser:
-        sp = sub.add_parser(name, help=help)
+    def add(name: str, fn, help: str, aliases: tuple[str, ...] = ()) -> argparse.ArgumentParser:
+        sp = sub.add_parser(name, help=help, aliases=list(aliases))
         sp.set_defaults(func=fn)
         return sp
 
@@ -48,7 +48,7 @@ def build_parser() -> argparse.ArgumentParser:
     add("logout", c.cmd_logout, "remove stored credentials")
     add("whoami", c.cmd_whoami, "show the active workspace + balance")
 
-    ip = add("init", c.cmd_init, "create a skillpack and write puras.yaml")
+    ip = add("init", c.cmd_init, "scaffold a skill and write puras.yaml")
     ip.add_argument("--name")
     ip.add_argument("--slug")
     ip.add_argument("--description")
@@ -61,32 +61,41 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ip.add_argument("--no-scaffold", action="store_true", help="don't write any starter files")
 
-    add("skillpacks", c.cmd_skillpacks, "list your skillpacks")
+    add("skillpacks", c.cmd_skillpacks, "list your skills", aliases=("skills",))
 
-    dp = add("deploy", c.cmd_deploy, "bundle a dir and push a deployment")
-    dp.add_argument("path", nargs="?", help="skillpack dir (default: .)")
-    dp.add_argument("--skillpack", help="skillpack id or slug (default: puras.yaml or the dir name; created on first deploy)")
+    dp = add("deploy", c.cmd_deploy, "bundle a skill dir and push a deployment")
+    dp.add_argument("path", nargs="?", help="skill dir (default: .)")
+    dp.add_argument(
+        "--app", "--skillpack", dest="skillpack",
+        help="skill id or slug to deploy to (default: puras.yaml, the skill's "
+        "name, or the dir name; created on first deploy)",
+    )
     dp.add_argument("--no-activate", action="store_true", help="upload without activating")
     dp.add_argument("--notes")
 
-    lsp = add("deployments", c.cmd_deployments, "list deployments for the skillpack")
-    lsp.add_argument("--skillpack")
+    lsp = add("deployments", c.cmd_deployments, "list deployments for the skill")
+    lsp.add_argument("--app", "--skillpack", dest="skillpack")
 
     ap = add("activate", c.cmd_activate, "activate a deployment by version or id")
     ap.add_argument("ref", help="version number (e.g. 3) or deployment id")
-    ap.add_argument("--skillpack")
+    ap.add_argument("--app", "--skillpack", dest="skillpack")
 
     rp = add("run", c.cmd_run, "submit a job and wait for the result")
     rp.add_argument(
         "skill", nargs="?",
-        help="skill name, or a path like workspace/skillpack/skill "
+        help="skill name, or a path copied from the skill's page "
         "(optional with --local when the bundle has one skill)",
+    )
+    rp.add_argument(
+        "-p", "--prompt",
+        help="run a one-off agent from this inline prompt — NO skill, NO deploy "
+        "needed. Use `-` to read stdin or `@file` to read a file.",
     )
     rp.add_argument("-i", "--input", action="append", metavar="KEY=VALUE", help="repeatable")
     rp.add_argument("--json", help="inputs as a JSON object")
     rp.add_argument("--async", dest="async_", action="store_true", help="don't wait")
     rp.add_argument("--timeout", type=int, default=60, help="wait seconds (default 60)")
-    rp.add_argument("--skillpack", help="default skillpack id or slug for a bare skill name")
+    rp.add_argument("--app", "--skillpack", dest="skillpack", help="default skill id or slug for a bare skill name")
     rp.add_argument("--version", type=int, help="pin to a deployment version (default: active)")
     # Offline mode: run a local bundle with no platform, on your own LLM key.
     rp.add_argument(
@@ -134,10 +143,10 @@ def build_parser() -> argparse.ArgumentParser:
     ep = add("eval", c.cmd_eval, "run a skill's eval suite (dataset + graders)")
     ep.add_argument(
         "skill", nargs="?",
-        help="skill name (its skillpack from --skillpack / puras.yaml; "
+        help="skill name (resolved from --app / puras.yaml; "
         "optional with --local when the bundle has one skill)",
     )
-    ep.add_argument("--skillpack", help="skillpack id (default: puras.yaml binding)")
+    ep.add_argument("--app", "--skillpack", dest="skillpack", help="skill id (default: puras.yaml binding)")
     ep.add_argument("--version", type=int, help="pin to a deployment version (default: active)")
     ep.add_argument("--repeat", type=int, default=1, help="run each case N times for variance (default 1)")
     ep.add_argument("--threshold", type=int, help="CI gate: fail if pass-rate %% is below this")
@@ -164,28 +173,28 @@ def build_parser() -> argparse.ArgumentParser:
 
     edp = add("eval-diff", c.cmd_eval_diff, "A/B two eval suites (version vs version)")
     edp.add_argument("skill", help="the skill both suites evaluated")
-    edp.add_argument("--skillpack", help="skillpack id (default: puras.yaml binding)")
+    edp.add_argument("--app", "--skillpack", dest="skillpack", help="skill id (default: puras.yaml binding)")
     edp.add_argument("--base", required=True, help="baseline: a version number or a suite id")
     edp.add_argument("--head", required=True, help="candidate: a version number or a suite id")
     edp.add_argument("--json", action="store_true", help="print the full diff as JSON")
 
-    secp = sub.add_parser("secrets", help="manage skillpack secrets")
+    secp = sub.add_parser("secrets", help="manage your skill's secrets")
     secp.set_defaults(func=lambda _a: secp.print_help())
     secsub = secp.add_subparsers(dest="subcmd", metavar="<set|ls|rm>")
     ss = secsub.add_parser("set", help="set a secret (NAME=VALUE or prompt)")
     ss.add_argument("assignment", metavar="NAME[=VALUE]")
-    ss.add_argument("--skillpack")
+    ss.add_argument("--app", "--skillpack", dest="skillpack")
     ss.set_defaults(func=c.cmd_secret_set)
     sl = secsub.add_parser("ls", help="list secret names")
-    sl.add_argument("--skillpack")
+    sl.add_argument("--app", "--skillpack", dest="skillpack")
     sl.set_defaults(func=c.cmd_secret_ls)
     sr = secsub.add_parser("rm", help="delete a secret")
     sr.add_argument("name")
-    sr.add_argument("--skillpack")
+    sr.add_argument("--app", "--skillpack", dest="skillpack")
     sr.set_defaults(func=c.cmd_secret_rm)
 
     pp = add("pull", c.cmd_pull, "download the active bundle")
-    pp.add_argument("--skillpack")
+    pp.add_argument("--app", "--skillpack", dest="skillpack")
     pp.add_argument("--out", help="output dir (default: .)")
 
     return p

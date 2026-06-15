@@ -26,17 +26,24 @@ EXCLUDE_FILES = {".DS_Store", ".env", ".env.local"}
 EXCLUDE_SUFFIXES = {".pyc", ".pyo", ".log"}
 
 
+def skill_dirs(root: Path) -> list[Path]:
+    """Top-level skill directories (each holds a `skill.yaml`) in `root`.
+
+    Used to detect the single-skill case — `puras deploy` names the deployment
+    after the lone skill so the end user never has to think about a pack."""
+    return [
+        d
+        for d in sorted(root.iterdir())
+        if d.is_dir() and d.name not in EXCLUDE_DIRS and (d / "skill.yaml").is_file()
+    ]
+
+
 def zip_skillpack(root: Path) -> bytes:
     root = root.resolve()
-    has_skill = any(
-        d.is_dir() and (d / "skill.yaml").is_file()
-        for d in root.iterdir()
-        if d.name not in EXCLUDE_DIRS
-    )
-    if not has_skill:
+    if not skill_dirs(root):
         raise FileNotFoundError(
             f"no `<skill>/skill.yaml` found in {root} — run this from your "
-            f"skillpack root (or `puras init` to create one)"
+            f"skill dir (or `puras init` to create one)"
         )
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:

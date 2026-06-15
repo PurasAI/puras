@@ -1,7 +1,7 @@
 """Command handlers. Each takes the parsed argparse namespace.
 
-Skillpack resolution order: --skillpack flag → nearest puras.yaml. Auth comes
-from `puras login` (~/.puras/config.json) or the PURAS_API_KEY env var.
+Skill resolution order: --app flag → nearest puras.yaml. Auth comes from
+`puras login` (~/.puras/config.json) or the PURAS_API_KEY env var.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from pathlib import Path
 
 import httpx
 
-from .bundle import zip_skillpack
+from .bundle import skill_dirs, zip_skillpack
 from .client import ApiClient, ApiError
 from .config import (
     DEFAULT_API_BASE,
@@ -65,10 +65,22 @@ def _skillpack_id(args) -> str:
     sid = getattr(args, "skillpack", None) or load_project().get("skillpack_id")
     if not sid:
         raise CliError(
-            "no skillpack — pass --skillpack <id|slug>, name the skill as "
-            "`workspace/skillpack/skill`, or run `puras init` in your skillpack dir"
+            "no skill — pass --app <id|slug>, name the skill as "
+            "`workspace/skill`, or run `puras init` in your skill dir"
         )
     return sid
+
+
+def _skill_title(skill_dir: Path) -> str | None:
+    """Best-effort display title from a skill dir's `skill.yaml` (`title:`)."""
+    try:
+        import yaml
+
+        data = yaml.safe_load((skill_dir / "skill.yaml").read_text()) or {}
+        title = data.get("title")
+        return str(title).strip() if title else None
+    except Exception:
+        return None
 
 
 def _skill_ref(args) -> tuple[dict, str]:
@@ -205,9 +217,9 @@ def cmd_init(args) -> None:
     # server syncs title/description to the public pack page on deploy.
     seeded = f.read_text()
     if "title:" not in seeded:
-        desc = args.description or "What this skillpack does, in one line."
+        desc = args.description or "What this skill does, in one line."
         f.write_text(seeded.rstrip("\n") + f"\n\ntitle: {sp['name']}\ndescription: {desc}\n")
-    ok(f"Created skillpack {bold(sp['slug'])}  ({sp['id']})")
+    ok(f"Created {bold(sp['slug'])}  ({sp['id']})")
     info(f"  wrote {PROJECT_FILE}")
     has_skill = any(
         d.is_dir() and (d / "skill.yaml").is_file() for d in Path.cwd().iterdir()
@@ -235,7 +247,7 @@ def cmd_skillpacks(args) -> None:
     finally:
         client.close()
     if not rows:
-        info("no skillpacks yet — `puras init`")
+        info("no skills yet — `puras init`")
         return
     table(
         [[r["slug"], r["name"], "active" if r["active_deployment_id"] else "—", r["id"]] for r in rows],
@@ -245,14 +257,20 @@ def cmd_skillpacks(args) -> None:
 
 # ── deployments ──────────────────────────────────────────────────────────────
 def _ensure_skillpack(client: ApiClient, args, root: Path) -> str:
-    """Resolve the skillpack to deploy to — by id, by slug, or by creating it
-    on the first deploy — so you never have to paste a UUID.
+    """Resolve where to deploy — by id, by slug, or by creating it on the first
+    deploy — so the end user never has to create or pick anything (Vercel-style
+    auto-provision).
 
     Order:
-      1. `--skillpack <uuid>`               → used directly.
-      2. puras.yaml `skillpack_id`          → from a prior init/deploy.
-      3. slug (`--skillpack <slug>` > puras.yaml `slug` > the dir name) →
-         matched against your skillpacks, or created if none matches.
+      1. `--app <uuid>`                  → used directly.
+      2. puras.yaml `skillpack_id`       → from a prior init/deploy.
+      3. slug (`--app <slug>` > puras.yaml `slug` > the lone skill's name >
+         the dir name) → matched against your existing deploys, or created
+         if none matches.
+
+    The default name/slug come from the single skill in the bundle when there
+    is exactly one (the common case: 1 skill = 1 deploy); a multi-skill bundle
+    falls back to the directory name.
 
     The resolved id is cached back to `puras.yaml` so later commands (logs,
     secrets, …) find it too."""
@@ -263,8 +281,17 @@ def _ensure_skillpack(client: ApiClient, args, root: Path) -> str:
     if not flag and proj.get("skillpack_id"):
         return proj["skillpack_id"]
 
-    slug = flag or proj.get("slug") or _slugify(root.name)
-    name = proj.get("title") or root.name
+    slug = flag or proj.get("slug")
+    name = proj.get("title")
+    if not slug:
+        skills = skill_dirs(root)
+        if len(skills) == 1:
+            slug = _slugify(skills[0].name)
+            name = name or _skill_title(skills[0]) or skills[0].name
+        else:
+            slug = _slugify(root.name)
+    name = name or root.name
+
     rows = client.get("/v1/skillpacks") or []
     match = next((r for r in rows if r.get("slug") == slug), None)
     if match:
@@ -273,7 +300,7 @@ def _ensure_skillpack(client: ApiClient, args, root: Path) -> str:
         sp = client.post("/v1/skillpacks", json_body={"name": name, "slug": slug})
         sid = sp["id"]
         slug = sp.get("slug") or slug
-        ok(f"Created skillpack {bold(slug)}  ({sid})")
+        ok(f"Created {bold(slug)}  ({sid})")
     save_project(root, {"skillpack_id": sid, "slug": slug})
     return sid
 
@@ -337,7 +364,7 @@ def cmd_activate(args) -> None:
             rows = client.get(f"/v1/skillpacks/{sid}/deployments")
             match = [r for r in rows if r["version"] == int(ref)]
             if not match:
-                raise CliError(f"no deployment v{ref} in this skillpack")
+                raise CliError(f"no deployment v{ref} in this skill")
             dep_id = match[0]["id"]
         res = client.post(f"/v1/skillpacks/{sid}/deployments/{dep_id}/activate")
     finally:
@@ -401,34 +428,22 @@ def _run_local(args) -> None:
     )
 
 
-def cmd_run(args) -> None:
-    if getattr(args, "local", False):
-        _run_local(args)
-        return
-    if not args.skill:
-        raise CliError("run requires a skill name (or use --local)")
-    client = _client()
-    try:
-        params, skill = _skill_ref(args)
-        inputs = _build_inputs(args)
-        if getattr(args, "version", None) is not None:
-            params["version"] = str(args.version)
-        if not args.async_:
-            params["wait"] = "true"
-            params["timeout"] = str(args.timeout)
-        job = client.post(
-            "/v1/jobs",
-            params=params,
-            json_body={"skill": skill, "inputs": inputs, "source": "cli"},
-        )
-    finally:
-        client.close()
+def _resolve_prompt(raw: str) -> str:
+    """An inline `--prompt` value. `-` reads stdin; `@path` reads a file;
+    anything else is used verbatim."""
+    if raw == "-":
+        return sys.stdin.read().strip()
+    if raw.startswith("@"):
+        return Path(raw[1:]).expanduser().read_text("utf-8").strip()
+    return raw
 
+
+def _report_run(args, job: dict) -> None:
+    """Print the outcome of a submitted run (shared by skill + inline runs)."""
     if args.async_:
         ok(f"Submitted job {job['id']} ({job['status']})")
         info(f"  follow with: puras logs {job['id']}")
         return
-
     st = job["status"]
     if st == "succeeded":
         ok(f"job {job['id']} · succeeded")
@@ -438,6 +453,41 @@ def cmd_run(args) -> None:
         raise SystemExit(1)
     else:
         info(f"job {job['id']} · {st} — still running; `puras logs {job['id']}`")
+
+
+def cmd_run(args) -> None:
+    if getattr(args, "local", False):
+        _run_local(args)
+        return
+
+    inputs = _build_inputs(args)
+    params: dict = {}
+    if not args.async_:
+        params["wait"] = "true"
+        params["timeout"] = str(args.timeout)
+
+    raw_prompt = getattr(args, "prompt", None)
+    if raw_prompt is not None:
+        # Deploy-free inline run: a raw prompt, no skill / skillpack / deploy.
+        if args.skill:
+            raise CliError("pass a skill OR --prompt, not both")
+        body = {"prompt": _resolve_prompt(raw_prompt), "inputs": inputs, "source": "cli"}
+    else:
+        if not args.skill:
+            raise CliError("run requires a skill name, --prompt, or --local")
+        ref_params, skill = _skill_ref(args)
+        params.update(ref_params)
+        if getattr(args, "version", None) is not None:
+            params["version"] = str(args.version)
+        body = {"skill": skill, "inputs": inputs, "source": "cli"}
+
+    client = _client()
+    try:
+        job = client.post("/v1/jobs", params=params, json_body=body)
+    finally:
+        client.close()
+
+    _report_run(args, job)
 
 
 def cmd_serve(args) -> None:
