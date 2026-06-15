@@ -241,6 +241,25 @@ class WorkerSettings(BaseSettings):
     # turn after it lands; only older steps pay the full re-read).
     tool_result_offload_head_chars: int = Field(6000, alias="TOOL_RESULT_OFFLOAD_HEAD_CHARS")
 
+    # --- Token economy: tool-result compression ---
+    # Before a large tool result is offloaded, a content-aware compressor shrinks
+    # it IN PLACE so it stays usable inline:
+    # JSON is minified and long homogeneous object-arrays collapse to a sample +
+    # a count, Python loses its comments, and logs/prose lose ANSI + trailing
+    # whitespace with runs of blank/identical lines folded to `… (×N)`.
+    # Deterministic + append-only, so it never invalidates the prompt cache; a
+    # lossy pass persists the exact original to the drive and leaves a `file_read`
+    # pointer (reversible). Disable with TOOL_RESULT_COMPRESS_ENABLED=false.
+    tool_result_compress_enabled: bool = Field(True, alias="TOOL_RESULT_COMPRESS_ENABLED")
+    # Don't bother compressing a result smaller than this — the marker/backup
+    # overhead isn't worth it. Sits below tool_result_offload_chars so mid-size
+    # results that wouldn't trigger an offload still get compressed.
+    tool_result_compress_min_chars: int = Field(2000, alias="TOOL_RESULT_COMPRESS_MIN_CHARS")
+    # Only adopt the compressed form when it saves at least this FRACTION of
+    # characters, so a result that barely shrinks isn't worth the marker (and, if
+    # lossy, a drive round-trip to make it retrievable).
+    tool_result_compress_min_ratio: float = Field(0.2, alias="TOOL_RESULT_COMPRESS_MIN_RATIO")
+
     # --- Token economy: server-side context editing (P2/P3) ---
     # Anthropic's `clear_tool_uses_20250919`: once the prompt exceeds `trigger`
     # input tokens, the API clears the OLDEST tool results (keeping the last
