@@ -183,7 +183,8 @@ crippled core — it's the capabilities that need real infrastructure.
 | Evals (`check`/`schema`/`rubric`) | ✓ per run + offline suites           | ✓ + suites at scale, CI gating, version diffs  |
 | Media (image/video/audio)    | —                                         | ✓ generation + persistence                     |
 | Web search / fetch / browser | —                                         | ✓                                              |
-| Shared memory & storage      | —                                         | ✓ persistent, workspace-scoped                 |
+| Shared memory                | ✓ persistent, local SQLite                | ✓ persistent, workspace-scoped + semantic (pgvector) |
+| Persistent storage           | —                                         | ✓ bucket-backed drive                          |
 | Durable resume               | —                                         | ✓ checkpointed, survives worker restarts       |
 | Budgets, tracing, dashboard  | console events + a token tally            | ✓ spend budgets, OTel spans, run timelines     |
 | Marketplace & sharing        | —                                         | ✓                                              |
@@ -195,9 +196,20 @@ won't see those tools locally. The included examples (`hello-world`,
 `skillpack-template`, `content-studio`) use only the local surface and run
 end-to-end offline.
 
+**Workspace memory works offline too.** The `memory_search` / `memory_get` /
+`memory_put` / `memory_forget` tools and the job-start memory injection are
+backed by a local SQLite file (`worker/memory_store_sqlite.py`) — the same
+agent-facing contract and the same hybrid ranking (exact identity + lexical,
+RRF-fused and shaped by recency × importance) as the hosted Postgres store, just
+without the pgvector semantic arm. So a skill's "shared brain" persists across
+`puras run --local` invocations. The DB lives next to the local drive root by
+default; point it anywhere with `PURAS_LOCAL_MEMORY_PATH`. Hosted memory adds
+semantic (embedding) retrieval and cross-workspace scope on top.
+
 ## How it works
 
-The runner runs the agent on a `LocalRunContext` with `platform_enabled=False`.
+The runner runs the agent on a `LocalRunContext` with `platform_enabled=False`
+(but `memory_enabled=True` — its `memory_backend()` returns the SQLite store).
 That `RunContext` seam is the whole trick: one agent loop, two environments. The
 offline import path is kept **dependency-light** — no Postgres/bucket/openai at
 import time — and that's enforced by

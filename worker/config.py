@@ -46,10 +46,19 @@ class WorkerSettings(BaseSettings):
     # Offline runner (`puras run --local`): the open-core local mode. When set,
     # the runtime runs with NO platform — there is no Postgres, no bucket, and no
     # platform API. The drive is a plain local directory (no bucket push/pull),
-    # the agent loop runs on a LocalRunContext (platform_enabled=False), and the
-    # hosted-only tools (memory / media / web / cross-skillpack subagents) are
-    # switched off. Hosted leaves this False; `local_run.run_local` sets it.
+    # the agent loop runs on a LocalRunContext (platform_enabled=False). The
+    # media / web / cross-skillpack-subagent tools stay off (they need the
+    # platform), but workspace memory is now backed by a local SQLite file (see
+    # memory_store_sqlite + local_memory_path) so the "shared brain" persists
+    # across local runs too. Hosted leaves this False; `local_run.run_local` sets it.
     local_mode: bool = Field(False, alias="PURAS_LOCAL_MODE")
+
+    # Offline workspace memory (SQLite). Path to the on-disk memory DB a local
+    # run reads/writes its "shared brain" from. Unset = a `memory.db` alongside
+    # the local drive root, so it persists across `puras run --local` invocations
+    # under one predictable folder. Only consulted on the offline path; the
+    # hosted worker uses Postgres (memory_store.py).
+    local_memory_path: str | None = Field(None, alias="PURAS_LOCAL_MEMORY_PATH")
 
     # Drive root. A plain local directory backed by the Supabase bucket via
     # explicit upload/download (no FUSE — see worker/drive.py). LOCAL_DRIVE_PATH

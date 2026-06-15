@@ -44,10 +44,23 @@ class RunContext(ABC):
     job_id: Any
     workspace_id: Any
 
-    # The open-core switch: hosted memory / media / web / cross-skillpack
-    # subagents. Local runs flip this off so those tools are cleanly disabled
-    # rather than erroring against an absent platform.
+    # The open-core switch: hosted media / web / cross-skillpack subagents.
+    # Local runs flip this off so those tools are cleanly disabled rather than
+    # erroring against an absent platform.
     platform_enabled: bool = True
+
+    # Whether workspace memory (memory_search/get/put/forget + job-start
+    # injection) is available. Hosted backs it with Postgres; a local run backs
+    # it with a SQLite file (memory_store_sqlite) so it stays ON offline too.
+    # The agent loop selects the backend via `memory_backend()`.
+    memory_enabled: bool = True
+
+    def memory_backend(self) -> tuple[Any, Any] | None:
+        """Return `(module, handle)` for the active memory store, or None when
+        memory is disabled. `module` exposes memory_search/get/put/forget/
+        context taking `handle` as their first argument (the DB session hosted,
+        a LocalMemoryStore locally)."""
+        return None
 
     @abstractmethod
     async def emit_event(self, event_type: str, payload: dict) -> None: ...
@@ -116,6 +129,11 @@ class DbRunContext(RunContext):
     def with_session(self, session) -> "DbRunContext":
         return DbRunContext(session, self.job_id, self.workspace_id)
 
+    def memory_backend(self):
+        # Hosted: the Postgres store operates on the run's DB session.
+        from . import memory_store
+        return memory_store, self.session
+
     async def emit_event(self, event_type: str, payload: dict) -> None:
         from .queue import emit_event
         await emit_event(self.session, self.job_id, event_type, payload)
@@ -178,14 +196,20 @@ class LocalRunContext(RunContext):
     Events stream to a sink (the console by default), usage is tallied for info,
     cancellation/cost are no-ops, checkpoints are skipped, and the hosted-only
     tools are switched off. There is no DB session — `session` is None, so any
-    not-yet-abstracted DB call must be guarded by `platform_enabled`."""
+    not-yet-abstracted DB call must be guarded by `platform_enabled`.
+
+    Workspace memory is the exception: it stays ON offline, backed by a local
+    SQLite file (memory_store_sqlite). `memory_backend()` hands the agent loop
+    that store so memory_search/put/etc behave the same as hosted."""
 
     platform_enabled = False
+    memory_enabled = True
     session = None
 
     def __init__(self, job_id, workspace_id, *, on_event=None):
         self.job_id = job_id
         self.workspace_id = workspace_id
+        self._mem_store = None  # lazily-built LocalMemoryStore
         # Default sink: a compact one-line console print. The CLI can pass a
         # richer renderer.
         self._on_event = on_event or self._print_event
@@ -197,8 +221,35 @@ class LocalRunContext(RunContext):
         self.spans: list[dict] = []
 
     def with_session(self, session) -> "LocalRunContext":
-        # No DB → concurrent tasks share this context; it does no DB I/O.
+        # No platform DB → concurrent tasks share this context (and its one
+        # SQLite memory store, which serializes its own access).
         return self
+
+    def _resolve_memory_path(self):
+        """The SQLite memory file: explicit PURAS_LOCAL_MEMORY_PATH, else a
+        `memory.db` alongside the local drive root so it persists across runs."""
+        from pathlib import Path
+
+        from .config import get_settings
+
+        s = get_settings()
+        if s.local_memory_path:
+            return Path(s.local_memory_path).expanduser()
+        try:
+            from .drive import get_drive_root
+            return get_drive_root().parent / "memory.db"
+        except Exception:
+            import tempfile
+            return Path(tempfile.gettempdir()) / "puras-local" / "memory.db"
+
+    def memory_backend(self):
+        if not self.memory_enabled:
+            return None
+        if self._mem_store is None:
+            from .memory_store_sqlite import LocalMemoryStore
+            self._mem_store = LocalMemoryStore(self._resolve_memory_path())
+        from . import memory_store_sqlite
+        return memory_store_sqlite, self._mem_store
 
     @staticmethod
     def _print_event(event_type: str, payload: dict) -> None:
