@@ -50,7 +50,7 @@ from jsonschema.exceptions import ValidationError
 
 from .agent_tool_specs import BUILTIN_AGENT_TOOLS, set_output_tool_spec
 from .function_runner import run_function
-from .llm_models import is_known_slug, resolve as resolve_model
+from .llm_models import DEFAULT_MODEL_SLUG, is_known_slug, resolve as resolve_model
 from .run_context import DbRunContext, RunContext
 from .pricing import with_margin
 from .proc_limits import child_preexec
@@ -147,11 +147,12 @@ _PARALLEL_MEDIA_LIMIT = max(1, int(os.getenv("PARALLEL_MEDIA_LIMIT", "4")))
 # Built-in tools that need the platform — the bucket (drive_url/drive_pull) or
 # the platform API (media generation + web). The open-core line: on a local run
 # (`puras run --local`, ctx.platform_enabled False) these are NOT offered to the
-# model, so it never reaches for a capability that can't exist offline. What
-# stays is the free local surface: text, bash, the file tools, deterministic
-# skill tools, in-process subagents — AND workspace memory, which a local run
-# backs with SQLite (see MEMORY_TOOLS / ctx.memory_backend). Mirrors the
-# LocalRunContext docstring and the run_context open-core switch.
+# model (except LOCAL_WEB_TOOLS, below), so it never reaches for a capability
+# that can't exist offline. What stays is the free local surface: text, bash,
+# the file tools, deterministic skill tools, in-process subagents — AND
+# workspace memory, which a local run backs with SQLite (see MEMORY_TOOLS /
+# ctx.memory_backend). Mirrors the LocalRunContext docstring and the
+# run_context open-core switch.
 PLATFORM_ONLY_TOOLS = frozenset(
     {
         # media generation (→ /v1/media, billing + fal)
@@ -162,6 +163,14 @@ PLATFORM_ONLY_TOOLS = frozenset(
         "drive_url", "drive_pull",
     }
 )
+
+# The exception to "platform-only ⇒ offline-off": web tools we CAN serve on a
+# local run using the user's own LLM key, so they're still offered offline even
+# though they're in PLATFORM_ONLY_TOOLS (which keeps gating their HOSTED dispatch
+# path). `web_search` runs on Anthropic's native server-side web_search tool —
+# see `_anthropic_web_search` and the web dispatch in run_agent. (image_search /
+# web_fetch / web_screenshot have no offline backing yet and stay hosted-only.)
+LOCAL_WEB_TOOLS = frozenset({"web_search"})
 
 # Workspace shared-memory tools. Gated on `ctx.memory_enabled` (not
 # platform_enabled) because they work in BOTH environments: Postgres hosted, a
@@ -831,8 +840,15 @@ def _build_tools(
     for spec in BUILTIN_AGENT_TOOLS:
         if spec["name"] == "bash" and skill.disable_bash:
             continue
-        # Local run: hosted-only built-ins are switched off (open-core line).
-        if not platform_enabled and spec["name"] in PLATFORM_ONLY_TOOLS:
+        # Local run: hosted-only built-ins are switched off (open-core line) —
+        # except the web tools we can back offline on the user's own LLM key
+        # (web_search → Anthropic's native server-side web_search). See
+        # LOCAL_WEB_TOOLS and the web dispatch in run_agent.
+        if (
+            not platform_enabled
+            and spec["name"] in PLATFORM_ONLY_TOOLS
+            and spec["name"] not in LOCAL_WEB_TOOLS
+        ):
             continue
         # Memory tools are gated separately — available offline via SQLite.
         if not memory_enabled and spec["name"] in MEMORY_TOOLS:
@@ -1313,6 +1329,126 @@ def _call_web(path: str, body: dict) -> dict:
     if not r.is_success:
         return {"ok": False, "error": f"web/{path} {r.status_code}: {r.text[:500]}"}
     return {"ok": True, **r.json()}
+
+
+def _anthropic_search_model(model_slug: str) -> str:
+    """Pick the upstream Anthropic model id to run a local web search on.
+
+    Anthropic's server-side web_search runs on a Claude model, so we use the
+    run's own model when it's a Claude (the user already chose it and pays for
+    it), and otherwise fall back to the default Claude — the search still runs on
+    the user's ANTHROPIC_API_KEY even when the agent itself runs a non-Claude
+    model via OpenRouter."""
+    if is_known_slug(model_slug):
+        info = resolve_model(model_slug)
+        if info.upstream_provider == "anthropic":
+            return info.upstream_id
+    return resolve_model(DEFAULT_MODEL_SLUG).upstream_id
+
+
+def _anthropic_web_search(
+    query: str, *, model_id: str, max_results: int = 5, max_uses: int = 5
+) -> dict:
+    """Local web search via Anthropic's native server-side `web_search` tool.
+
+    A local run has no platform `/v1/web` endpoint, so `web_search` is backed
+    here by a single Anthropic Messages request with the built-in web_search tool
+    enabled — run on the user's own ANTHROPIC_API_KEY (BYO). We reshape the
+    `web_search_tool_result` blocks into the same `{results: [{title, url, …}]}`
+    contract the hosted endpoint returns, plus the model's short summary.
+
+    Billed $0 by Puras — the user pays Anthropic directly for the searches
+    ($10/1k) and tokens, like every other token on a local run. Raw httpx (not
+    the SDK) so parsing the server-tool result blocks doesn't depend on the
+    pinned `anthropic` version typing them. Soft `{ok: False}` on any failure so
+    the dispatcher turns it into a tool error the agent can react to."""
+    import os
+
+    import httpx
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        return {"ok": False, "error": "web_search needs ANTHROPIC_API_KEY on a local run"}
+    if not (query or "").strip():
+        return {"ok": False, "error": "web_search needs a non-empty query"}
+
+    body = {
+        "model": model_id,
+        "max_tokens": 4096,
+        "messages": [
+            {
+                "role": "user",
+                "content": (
+                    f"Search the web for: {query}\n\n"
+                    "Use the web_search tool, then briefly summarize what you found."
+                ),
+            }
+        ],
+        "tools": [
+            {"type": "web_search_20250305", "name": "web_search", "max_uses": max_uses}
+        ],
+    }
+    try:
+        r = httpx.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            json=body,
+            timeout=90,
+        )
+    except httpx.HTTPError as e:
+        return {"ok": False, "error": f"web_search request failed: {e}"}
+    if not r.is_success:
+        return {"ok": False, "error": f"web_search {r.status_code}: {r.text[:500]}"}
+    try:
+        data = r.json()
+    except ValueError as e:
+        return {"ok": False, "error": f"web_search bad response: {e}"}
+
+    results: list[dict] = []
+    summary: list[str] = []
+    for block in data.get("content", []):
+        if not isinstance(block, dict):
+            continue
+        btype = block.get("type")
+        if btype == "text":
+            text = block.get("text")
+            if text:
+                summary.append(text)
+        elif btype == "web_search_tool_result":
+            content = block.get("content")
+            # The whole search can come back as one error object (e.g. the org
+            # hasn't enabled web search, or max_uses was exceeded).
+            if (
+                isinstance(content, dict)
+                and content.get("type") == "web_search_tool_result_error"
+            ):
+                return {
+                    "ok": False,
+                    "error": f"web_search failed: {content.get('error_code', 'unknown')}",
+                }
+            for item in content or []:
+                if isinstance(item, dict) and item.get("type") == "web_search_result":
+                    results.append(
+                        {
+                            "title": item.get("title"),
+                            "url": item.get("url"),
+                            "page_age": item.get("page_age"),
+                        }
+                    )
+
+    if max_results and len(results) > max_results:
+        results = results[:max_results]
+    return {
+        "ok": True,
+        "query": query,
+        "results": results,
+        "summary": "".join(summary).strip(),
+        "billed_micros": 0,
+    }
 
 
 def _clean_drive_path(path: Any) -> tuple[str | None, str | None]:
@@ -2986,6 +3122,18 @@ async def run_agent(
                 )
             elif tu.name in ("web_search", "image_search", "web_fetch"):
                 args = tu.input if isinstance(tu.input, dict) else {}
+                # Local run (no platform /v1/web): web_search is the one web tool
+                # offered offline — back it with Anthropic's native server-side
+                # web_search tool on the user's own ANTHROPIC_API_KEY (BYO). The
+                # hosted /v1/web path below is unchanged for platform runs.
+                out: dict[str, Any] | None = None
+                if not ctx.platform_enabled and tu.name == "web_search":
+                    out = await asyncio.to_thread(
+                        _anthropic_web_search,
+                        args.get("query", ""),
+                        model_id=_anthropic_search_model(model_slug),
+                        max_results=int(args.get("max_results") or 5),
+                    )
                 req: dict[str, Any] = {
                     "workspace_id": str(workspace_id),
                     "job_id": str(job_id),
@@ -3008,7 +3156,9 @@ async def run_agent(
                         req["max_chars"] = args["max_chars"]
                 # web_fetch(render_js=true) renders in the worker's headless
                 # browser instead of the API's plain HTTP fetch.
-                if tu.name == "web_fetch" and args.get("render_js"):
+                if out is not None:
+                    pass  # already served by the local Anthropic-backed branch
+                elif tu.name == "web_fetch" and args.get("render_js"):
                     max_chars = int(args.get("max_chars") or 20000)
                     out = await asyncio.to_thread(
                         _run_web_fetch_js, req["url"], max_chars

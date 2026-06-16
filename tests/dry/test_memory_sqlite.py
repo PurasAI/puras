@@ -168,13 +168,20 @@ def test_context_workspace_isolation(mem):
     _run(go())
 
 
-# ── tool gating: memory is the one hosted capability that stays on offline ────
+# ── tool gating: memory + web_search are the capabilities that stay on offline ─
 def test_memory_tools_are_not_platform_only():
     # Splitting them out of PLATFORM_ONLY_TOOLS is what keeps them available on
-    # a local run; media/web/drive helpers must stay platform-only.
+    # a local run; media/drive helpers must stay platform-only.
     assert not (agent_runner.MEMORY_TOOLS & agent_runner.PLATFORM_ONLY_TOOLS)
-    for name in ("generate_image", "web_search", "drive_pull"):
+    for name in ("generate_image", "drive_pull", "image_search"):
         assert name in agent_runner.PLATFORM_ONLY_TOOLS
+
+    # web_search stays in PLATFORM_ONLY_TOOLS (it gates the HOSTED dispatch), but
+    # is carved into LOCAL_WEB_TOOLS so a local run still offers it — backed by
+    # Anthropic's native web search instead of the platform /v1/web endpoint.
+    assert "web_search" in agent_runner.PLATFORM_ONLY_TOOLS
+    assert "web_search" in agent_runner.LOCAL_WEB_TOOLS
+    assert not (agent_runner.LOCAL_WEB_TOOLS - agent_runner.PLATFORM_ONLY_TOOLS)
 
 
 def _stub_skill():
@@ -186,14 +193,18 @@ def _stub_skill():
     )
 
 
-def test_local_build_tools_offers_memory_but_not_media():
+def test_local_build_tools_offers_memory_and_web_search_but_not_media():
     # platform_enabled False (local), memory_enabled True (SQLite-backed).
     tools, _ = agent_runner._build_tools(
         _stub_skill(), platform_enabled=False, memory_enabled=True
     )
     names = {t["name"] for t in tools}
     assert {"memory_search", "memory_put", "memory_get", "memory_forget"} <= names
-    assert "generate_image" not in names and "web_search" not in names
+    # web_search is offered offline (Anthropic-backed); the rest of the
+    # platform-only surface (media + the other web tools) is not.
+    assert "web_search" in names
+    assert "generate_image" not in names
+    assert "image_search" not in names and "web_fetch" not in names
 
 
 def test_memory_can_be_disabled_entirely():

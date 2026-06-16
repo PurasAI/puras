@@ -264,8 +264,8 @@ TRANSCRIBE_TOOL_SPEC = {
 WEB_SEARCH_TOOL_SPEC = {
     "name": "web_search",
     "description": (
-        "Search the web via the platform's search provider. Returns a list of "
-        "results with title, url, and a short snippet."
+        "Search the web for current information. Returns a list of results with "
+        "title and url (plus a short snippet or summary)."
     ),
     "input_schema": {
         "type": "object",

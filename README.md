@@ -8,7 +8,7 @@
 [![PyPI](https://img.shields.io/pypi/v/puras.svg)](https://pypi.org/project/puras/)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 
-[Docs](https://puras.co/docs) · [Cloud](https://puras.co) · [Examples](./examples) · [Build a skill](#build-your-own-skill)
+[Docs](https://puras.co/docs) · [Examples](./examples) · [Build a skill](#build-your-own-skill)
 
 </div>
 
@@ -33,8 +33,6 @@ puras run --local greeter --dir ./examples/hello-world -i name=Ada
 
 ## Getting started
 
-### Run it locally
-
 The whole point of this repo — a skill's agent loop on your machine, on your key:
 
 ```bash
@@ -54,16 +52,6 @@ From a checkout of this repo instead of PyPI:
 pip install -e .             # puras-runner (the runtime)
 pip install -e worker/sdk    # the puras CLI + SDK
 ```
-
-### …or use Puras Cloud (recommended for production)
-
-The fastest way to run a skill with the **full tool surface** — media generation,
-web search/fetch, shared memory, persistent storage, durable resume, and
-eval suites at scale — is to [sign up free at puras.co](https://puras.co). No
-infrastructure to manage, automatic scaling, and a one-line MCP connect for
-Claude Code. The local runner here gives you the free, offline core; Cloud adds
-the managed, hosted surface for when you ship. The [comparison below](#open-source-vs-cloud)
-spells out exactly which is which.
 
 ## Run a skill
 
@@ -182,7 +170,7 @@ crippled core — it's the capabilities that need real infrastructure.
 | Job API for your app         | ✓ `puras serve` — the job API on localhost | ✓ api.puras.co — managed, scaled, durable     |
 | Evals (`check`/`schema`/`rubric`) | ✓ per run + offline suites           | ✓ + suites at scale, CI gating, version diffs  |
 | Media (image/video/audio)    | —                                         | ✓ generation + persistence                     |
-| Web search / fetch / browser | —                                         | ✓                                              |
+| Web search / fetch / browser | ✓ `web_search` (your Anthropic key); fetch & browser are Cloud | ✓                |
 | Shared memory                | ✓ persistent, local SQLite                | ✓ persistent, workspace-scoped + semantic (pgvector) |
 | Persistent storage           | —                                         | ✓ bucket-backed drive                          |
 | Durable resume               | —                                         | ✓ checkpointed, survives worker restarts       |
@@ -190,9 +178,10 @@ crippled core — it's the capabilities that need real infrastructure.
 | Marketplace & sharing        | —                                         | ✓                                              |
 | Support                      | [Issues](../../issues) & [Discussions](../../discussions) | priority / SLA              |
 
-The hosted-only tools (`worker/agent_runner.py:PLATFORM_ONLY_TOOLS`) are simply
-not offered to the model offline, so a skill that needs them still runs — it just
-won't see those tools locally. The included examples (`hello-world`,
+The hosted-only tools (`worker/agent_runner.py:PLATFORM_ONLY_TOOLS`, minus the
+`web_search` carve-out below) are simply not offered to the model offline, so a
+skill that needs them still runs — it just won't see those tools locally. The
+included examples (`hello-world`,
 `skillpack-template`, `content-studio`) use only the local surface and run
 end-to-end offline.
 
@@ -205,6 +194,15 @@ without the pgvector semantic arm. So a skill's "shared brain" persists across
 `puras run --local` invocations. The DB lives next to the local drive root by
 default; point it anywhere with `PURAS_LOCAL_MEMORY_PATH`. Hosted memory adds
 semantic (embedding) retrieval and cross-workspace scope on top.
+
+**Web search works offline too.** A local run has no platform search endpoint, so
+the `web_search` tool is backed by [Anthropic's native server-side web
+search](https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool)
+on your own `ANTHROPIC_API_KEY` — the same agent-facing tool, run on your key
+(you pay Anthropic for the searches and tokens, nothing to Puras). It works even
+when the agent itself runs a non-Claude model, and needs web search enabled for
+your Anthropic org. The other web tools (image search, plain fetch, the headless
+browser) stay Cloud-only for now.
 
 ## How it works
 

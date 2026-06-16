@@ -198,9 +198,11 @@ class LocalRunContext(RunContext):
     tools are switched off. There is no DB session — `session` is None, so any
     not-yet-abstracted DB call must be guarded by `platform_enabled`.
 
-    Workspace memory is the exception: it stays ON offline, backed by a local
-    SQLite file (memory_store_sqlite). `memory_backend()` hands the agent loop
-    that store so memory_search/put/etc behave the same as hosted."""
+    Workspace memory and web search are the exceptions that stay ON offline:
+    memory is backed by a local SQLite file (memory_store_sqlite), and
+    `web_search` is backed by Anthropic's native server-side web search on the
+    user's BYO key (see `_anthropic_web_search`). `memory_backend()` hands the
+    agent loop that store so memory_search/put/etc behave the same as hosted."""
 
     platform_enabled = False
     memory_enabled = True
