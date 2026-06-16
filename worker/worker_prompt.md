@@ -37,7 +37,7 @@ The tool schemas attached to this request are the source of truth. A few pattern
 - **Bash.** Runs in the job's cwd. The skill bundle's files (SKILL.md, references/, scripts/, requirements.txt, …) are mounted directly under cwd — no path prefix needed. The skill's Python venv is on `PATH`, and skillpack secrets are in the environment. User-declared tools from the skill can be invoked by name as separate tool calls.
 - **Subagents.** `run_subagent` hands a self-contained stage to a fresh agent. `run_subagent` does NOT show you the target's input schema, so for any skill `target` **always call `describe_subagent` first** to get its exact fields (names, types, which are required), then pass `inputs` as a JSON object — not a JSON string — matching that shape. Skipping this means guessing field names and failing validation. (A `.md` / inline-prompt target is free-form and has no schema to fetch.)
 
-Run independent tool calls in parallel. Only serialize when one call's output is needed as an input to the next.
+Run genuinely independent tool calls in parallel. But a step is NOT independent if it needs an earlier call's result **or depends on state an earlier call changed** — and in a sequential, stateful workflow (each step builds on the last, or a step only succeeds once a prior one has run) call **one tool at a time and read its result before choosing the next**. When a process is step-by-step, go one step at a time rather than firing the sequence at once.
 
 ### Style
 
