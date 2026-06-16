@@ -200,7 +200,12 @@ class LocalRunContext(RunContext):
 
     Workspace memory is the exception: it stays ON offline, backed by a local
     SQLite file (memory_store_sqlite). `memory_backend()` hands the agent loop
-    that store so memory_search/put/etc behave the same as hosted."""
+    that store so memory_search/put/etc behave the same as hosted.
+
+    A few more tools have a BYO-key direct path offline (no platform): the media
+    `generate_*` verbs when `FAL_KEY` is set (call Fal directly — media_local),
+    and `web_search` / `web_fetch` (web_fetch over HTTP, web_search via
+    Anthropic's server-side tool — web_local). See agent_runner._build_tools."""
 
     platform_enabled = False
     memory_enabled = True

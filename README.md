@@ -181,8 +181,8 @@ crippled core — it's the capabilities that need real infrastructure.
 | Agent loop & local tools     | ✓ text, `bash`, file tools, your Python tools, in-process subagents | ✓ same loop                |
 | Job API for your app         | ✓ `puras serve` — the job API on localhost | ✓ api.puras.co — managed, scaled, durable     |
 | Evals (`check`/`schema`/`rubric`) | ✓ per run + offline suites           | ✓ + suites at scale, CI gating, version diffs  |
-| Media (image/video/audio)    | —                                         | ✓ generation + persistence                     |
-| Web search / fetch / browser | —                                         | ✓                                              |
+| Media (image/video/audio)    | ✓ `generate_*` with a Fal key (BYO, direct to Fal) | ✓ generation + persistence (bucket-backed)     |
+| Web search / fetch / browser | ✓ search (your Anthropic key) + fetch     | ✓ search / fetch / browser screenshots         |
 | Shared memory                | ✓ persistent, local SQLite                | ✓ persistent, workspace-scoped + semantic (pgvector) |
 | Persistent storage           | —                                         | ✓ bucket-backed drive                          |
 | Durable resume               | —                                         | ✓ checkpointed, survives worker restarts       |
@@ -192,9 +192,22 @@ crippled core — it's the capabilities that need real infrastructure.
 
 The hosted-only tools (`worker/agent_runner.py:PLATFORM_ONLY_TOOLS`) are simply
 not offered to the model offline, so a skill that needs them still runs — it just
-won't see those tools locally. The included examples (`hello-world`,
-`skillpack-template`, `content-studio`) use only the local surface and run
-end-to-end offline.
+won't see those tools locally. The exceptions are the three that have a BYO-key
+direct path (see below): the media `generate_*` verbs and `web_search` /
+`web_fetch`. The included examples (`hello-world`, `skillpack-template`,
+`content-studio`) use only the local surface and run end-to-end offline.
+
+**Media and web work offline too (BYO keys).** The hosted platform owns a Fal
+key, a bucket, and a web service; the local runner instead reaches the same
+providers on *your* keys, with no platform in between. Set `FAL_KEY` and the
+`generate_image` / `generate_video` / `generate_audio` / `transcribe` verbs call
+Fal directly (`worker/media_local.py`) — same verb resolution and result shape
+as hosted, the output landing on your local drive (no bucket, no billing). And
+`web_fetch` runs as a plain HTTP GET while `web_search` runs through Anthropic's
+server-side web-search tool on your `ANTHROPIC_API_KEY` (`worker/web_local.py`),
+so a skill that researches the web works the same locally as in prod. Hosted adds
+managed billing, persistence to a bucket-backed drive, image search, and headless
+browser screenshots on top.
 
 **Workspace memory works offline too.** The `memory_search` / `memory_get` /
 `memory_put` / `memory_forget` tools and the job-start memory injection are
