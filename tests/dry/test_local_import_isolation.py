@@ -36,6 +36,10 @@ sys.meta_path.insert(0, _Blocker())
 # The offline entrypoint and everything run_local imports at module load.
 import worker.local_run            # noqa: F401
 import worker.agent_runner         # noqa: F401  (the crown-jewel loop)
+import worker.media_local          # noqa: F401  (local Fal media; fal_client stays lazy)
+import worker.media_verbs          # noqa: F401  (pure verb→model resolution)
+import worker.media_registry       # noqa: F401  (pure media model table)
+import worker.web_local            # noqa: F401  (local web fetch/search; httpx/anthropic ok)
 import worker.deployment           # noqa: F401
 import worker.drive                # noqa: F401
 import worker.manifest             # noqa: F401

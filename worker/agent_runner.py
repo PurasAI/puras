@@ -144,14 +144,22 @@ MAX_SUBAGENT_DEPTH = 5
 _MEDIA_VERBS = {"generate_image", "generate_video", "generate_audio", "transcribe"}
 _PARALLEL_MEDIA_LIMIT = max(1, int(os.getenv("PARALLEL_MEDIA_LIMIT", "4")))
 
+# Web tools a local run can serve without the platform: web_fetch as a direct
+# HTTP GET, web_search via Anthropic's server-side web_search tool (BYO key).
+# Re-enabled offline by _build_tools(web_enabled=True); see worker/web_local.py.
+_LOCAL_WEB_TOOLS = {"web_search", "web_fetch"}
+
 # Built-in tools that need the platform — the bucket (drive_url/drive_pull) or
 # the platform API (media generation + web). The open-core line: on a local run
 # (`puras run --local`, ctx.platform_enabled False) these are NOT offered to the
 # model, so it never reaches for a capability that can't exist offline. What
 # stays is the free local surface: text, bash, the file tools, deterministic
 # skill tools, in-process subagents — AND workspace memory, which a local run
-# backs with SQLite (see MEMORY_TOOLS / ctx.memory_backend). Mirrors the
-# LocalRunContext docstring and the run_context open-core switch.
+# backs with SQLite (see MEMORY_TOOLS / ctx.memory_backend). Three of these are
+# re-enabled offline as BYO-key direct paths (no platform): the media generate_*
+# verbs when FAL_KEY is set (_MEDIA_VERBS → media_local), and web_search /
+# web_fetch always (_LOCAL_WEB_TOOLS → web_local). Mirrors the LocalRunContext
+# docstring and the run_context open-core switch.
 PLATFORM_ONLY_TOOLS = frozenset(
     {
         # media generation (→ /v1/media, billing + fal)
@@ -781,7 +789,8 @@ def _check_output_payload(output_schema, value) -> str | None:
 
 
 def _build_tools(
-    skill: LoadedSkill, *, platform_enabled: bool = True, memory_enabled: bool = True
+    skill: LoadedSkill, *, platform_enabled: bool = True, memory_enabled: bool = True,
+    media_enabled: bool = False, web_enabled: bool = False,
 ) -> tuple[list[dict], bool]:
     """Returns (tools, has_set_output).
 
@@ -793,7 +802,12 @@ def _build_tools(
     PLATFORM_ONLY_TOOLS) are dropped from the offered tool list, so the model is
     never handed a capability that can't exist offline. `memory_enabled` gates
     the workspace-memory tools independently — they work offline (SQLite) so
-    they're dropped only when memory is turned off entirely.
+    they're dropped only when memory is turned off entirely. `media_enabled`
+    (a local run with a Fal key) and `web_enabled` (a local run, always) are the
+    exceptions to the open-core drop: a local run can serve the media generate_*
+    verbs directly against Fal (BYO key) and the web_search / web_fetch tools
+    (web_fetch over direct HTTP, web_search via Anthropic), so those stay on
+    even though the platform is off.
     Every tool gets an auto-injected optional `_label` field so the model
     can attach a short progress label the playground UI surfaces — omitted
     when the call should stay internal.
@@ -831,9 +845,17 @@ def _build_tools(
     for spec in BUILTIN_AGENT_TOOLS:
         if spec["name"] == "bash" and skill.disable_bash:
             continue
-        # Local run: hosted-only built-ins are switched off (open-core line).
+        # Local run: hosted-only built-ins are switched off (open-core line),
+        # except the media generate_* verbs (BYO Fal key) and the web_search /
+        # web_fetch tools, which a local run serves itself (see web_local /
+        # media_local) and so re-enables here.
         if not platform_enabled and spec["name"] in PLATFORM_ONLY_TOOLS:
-            continue
+            if media_enabled and spec["name"] in _MEDIA_VERBS:
+                pass
+            elif web_enabled and spec["name"] in _LOCAL_WEB_TOOLS:
+                pass
+            else:
+                continue
         # Memory tools are gated separately — available offline via SQLite.
         if not memory_enabled and spec["name"] in MEMORY_TOOLS:
             continue
@@ -987,6 +1009,65 @@ def _persist_url_to_drive(url: str, workspace_id: str, drive_path: str) -> None:
                 for chunk in resp.iter_bytes():
                     f.write(chunk)
     os.replace(tmp, dest)
+
+
+def _local_media_enabled(ctx) -> bool:
+    """A local run (`platform_enabled` False) calls Fal directly when FAL_KEY is
+    set — the BYO-key media path. Hosted (`platform_enabled` True) always goes
+    through the API, so this is only ever True offline."""
+    if getattr(ctx, "platform_enabled", True):
+        return False
+    try:
+        return bool(get_settings().fal_key)
+    except Exception:
+        return False
+
+
+def _call_media_local(
+    model: str,
+    inputs: dict,
+    workspace_id: str,
+    job_id: str,
+    *,
+    verb: str | None = None,
+    output_path: str | None = None,
+    output_dir: str | None = None,
+    output_url_path: str | None = None,
+    kind: str = "auto",
+) -> dict:
+    """Local counterpart to `_call_media`: generate against Fal directly (no
+    platform API, no billing) and stream the output onto the local drive. Same
+    return contract as `_call_media` — `{ok, model, kind, drive_path, meta, …}`
+    — so the dispatcher treats both paths identically. There's no bucket offline,
+    so we skip the bucket push (the local drive IS the store)."""
+    from . import media_local
+    from .media_verbs import VerbError
+
+    try:
+        data = media_local.generate(
+            model,
+            inputs or {},
+            workspace_id,
+            job_id,
+            verb=verb,
+            output_path=output_path,
+            output_dir=output_dir,
+            output_url_path=output_url_path,
+            kind=kind,
+        )
+    except media_local.LocalMediaError as e:
+        return {"ok": False, "error": str(e)}
+    except VerbError as e:
+        return {"ok": False, "error": str(e)}
+
+    out_url = data.pop("output_url", None)
+    drive_path = data.get("drive_path")
+    if out_url and drive_path:
+        try:
+            _persist_url_to_drive(out_url, workspace_id, drive_path)
+        except Exception as e:
+            return {"ok": False, "error": f"failed to save media to drive: {e}"}
+    return {"ok": True, **data}
 
 
 # /v1/subagent/invoke caps body.timeout at 1800s (api schemas — the long-poll
@@ -1313,6 +1394,32 @@ def _call_web(path: str, body: dict) -> dict:
     if not r.is_success:
         return {"ok": False, "error": f"web/{path} {r.status_code}: {r.text[:500]}"}
     return {"ok": True, **r.json()}
+
+
+def _local_web_enabled(ctx) -> bool:
+    """A local run (`platform_enabled` False) serves web_search/web_fetch without
+    the platform — web_fetch as a direct HTTP GET, web_search via Anthropic's
+    server-side web_search tool (BYO ANTHROPIC_API_KEY). Hosted always goes
+    through the platform /v1/web service, so this is only ever True offline."""
+    return not getattr(ctx, "platform_enabled", True)
+
+
+def _call_web_local(path: str, body: dict) -> dict:
+    """Local counterpart to `_call_web`: back web_search/web_fetch on the user's
+    own machine + key (no platform). Same `{ok, ...}` return contract as
+    `_call_web`, so the dispatcher treats both paths identically."""
+    from . import web_local
+
+    try:
+        if path == "search":
+            data = web_local.search(body.get("query", ""), body.get("max_results", 5))
+        elif path == "fetch":
+            data = web_local.fetch(body.get("url", ""), body.get("max_chars", 20000))
+        else:
+            return {"ok": False, "error": f"web/{path} is not available in a local run"}
+    except web_local.LocalWebError as e:
+        return {"ok": False, "error": str(e)}
+    return {"ok": True, **data}
 
 
 def _clean_drive_path(path: Any) -> tuple[str | None, str | None]:
@@ -2280,11 +2387,15 @@ async def run_agent(
 
     tools_by_name: dict[str, LoadedTool] = {t.name: t for t in skill.tools}
     # Local runs (ctx.platform_enabled False) drop the hosted-only built-ins;
-    # memory tools follow ctx.memory_enabled (offline = SQLite-backed).
+    # memory tools follow ctx.memory_enabled (offline = SQLite-backed). A local
+    # run keeps the media generate_* verbs when a Fal key is set, and the
+    # web_search / web_fetch tools always (served directly — see web_local).
     tools, has_set_output = _build_tools(
         skill,
         platform_enabled=ctx.platform_enabled,
         memory_enabled=ctx.memory_enabled,
+        media_enabled=_local_media_enabled(ctx),
+        web_enabled=_local_web_enabled(ctx),
     )
 
     # System prompt is rendered from `worker_prompt.md` — see that file for
@@ -2488,8 +2599,11 @@ async def run_agent(
         op = args.get("output_path")
         if isinstance(op, str) and op.startswith("drive/"):
             op = op[len("drive/"):]
+        # Local run with a Fal key: call Fal directly (BYO key, no platform).
+        # Hosted always goes through the API (_call_media).
+        media_fn = _call_media_local if _local_media_enabled(ctx) else _call_media
         out = await asyncio.to_thread(
-            _call_media,
+            media_fn,
             media_slug,
             media_inputs if isinstance(media_inputs, dict) else {},
             str(workspace_id),
@@ -3007,12 +3121,15 @@ async def run_agent(
                     if "max_chars" in args:
                         req["max_chars"] = args["max_chars"]
                 # web_fetch(render_js=true) renders in the worker's headless
-                # browser instead of the API's plain HTTP fetch.
+                # browser instead of the plain HTTP fetch.
                 if tu.name == "web_fetch" and args.get("render_js"):
                     max_chars = int(args.get("max_chars") or 20000)
                     out = await asyncio.to_thread(
                         _run_web_fetch_js, req["url"], max_chars
                     )
+                # Local run: serve search/fetch directly (web_local), no platform.
+                elif _local_web_enabled(ctx):
+                    out = await asyncio.to_thread(_call_web_local, endpoint_path, req)
                 else:
                     out = await asyncio.to_thread(_call_web, endpoint_path, req)
                 if out.get("ok"):
