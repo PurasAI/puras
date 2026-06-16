@@ -1,21 +1,30 @@
-# Publish to PyPI on merge to main — the "version-changed" model.
+# Publish to PyPI on merge to main — auto-version model.
 #
-# This repo ships TWO independent wheels, each with its version pinned by hand in
-# an __init__.py (see pyproject `dynamic = ["version"]`):
+# This repo ships TWO independent wheels:
 #
 #   puras-runner  ->  worker/__init__.py            (root pyproject.toml)
 #   puras         ->  worker/sdk/puras/__init__.py  (worker/sdk/pyproject.toml)
 #
-# On every push to main each package is checked against PyPI: if its current
-# version is ALREADY published, the leg is a no-op (PyPI is immutable — you can't
-# re-upload a version). If the version is new, the wheel/sdist is built and
-# uploaded. So a release is just "bump the __version__ in your PR" — the merge
-# does the rest, and the two packages move independently.
+# Version resolution (per package, on every push to main):
 #
-# Auth is PyPI Trusted Publishing (OIDC): no token stored in the repo. Each PyPI
-# project must have a trusted publisher pointing at THIS workflow file
-# (publish.yml) under repo PurasAI/puras — see the one-time setup note at the
-# bottom of this file.
+#   1. Read __version__ from the package's __init__.py  ("source version")
+#   2. Query PyPI for the latest published version       ("pypi latest")
+#
+#   If source > pypi latest  ->  developer manually bumped (minor or major).
+#                                Publish the source version as-is.
+#
+#   If source <= pypi latest ->  version was NOT bumped.  Check whether
+#                                relevant code files changed in this push.
+#                                  Changed   -> auto-bump to pypi_latest + 1 minor, publish.
+#                                  Unchanged -> skip (no release needed).
+#
+# This means:
+#   - Major bumps are always manual: set __version__ = "2.0.0" in your PR.
+#   - Minor/patch bumps happen automatically whenever code changes.
+#   - A push that only touches docs, CI, or examples -> no publish.
+#   - Two packages move independently; a runner change does not force an SDK publish.
+#
+# Auth: PyPI Trusted Publishing (OIDC) - no token stored in the repo.
 
 name: publish
 
@@ -23,7 +32,6 @@ on:
   push:
     branches: [main]
 
-# Don't let two main-pushes publish at once.
 concurrency:
   group: publish-${{ github.ref }}
   cancel-in-progress: false
@@ -32,8 +40,6 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     strategy:
-      # Keep going even if one package's leg fails, so a runner bump still ships
-      # when the SDK leg has an unrelated hiccup (and vice versa).
       fail-fast: false
       matrix:
         include:
@@ -44,76 +50,136 @@ jobs:
             dir: worker/sdk
             version_file: worker/sdk/puras/__init__.py
     permissions:
-      # Required for Trusted Publishing (OIDC). No PyPI token needed.
       id-token: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: Read the package version from its __init__.py
-        id: ver
+      - name: Resolve version and decide whether to publish
+        id: resolve
+        env:
+          PKG: ${{ matrix.pkg }}
+          VERSION_FILE: ${{ matrix.version_file }}
+          BEFORE_SHA: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
         run: |
-          VERSION=$(python - "$VERSION_FILE" <<'PY'
+          set -euo pipefail
+
+          # 1. Read source version from __init__.py
+          SOURCE=$(python3 - "$VERSION_FILE" <<'PY'
           import re, sys
           src = open(sys.argv[1], encoding="utf-8").read()
-          m = re.search(r'^__version__\s*=\s*["\']([^"\']+)["\']', src, re.M)
-          if not m:
-              sys.exit(f"no __version__ found in {sys.argv[1]}")
+          m = re.search(r"^__version__\s*=\s*[\"']([^\"']+)[\"']", src, re.M)
+          if not m: sys.exit(f"no __version__ in {sys.argv[1]}")
           print(m.group(1))
           PY
           )
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "::notice::${PKG} version is ${VERSION}"
-        env:
-          VERSION_FILE: ${{ matrix.version_file }}
-          PKG: ${{ matrix.pkg }}
+          echo "::notice::${PKG} source version: ${SOURCE}"
 
-      - name: Is this version already on PyPI?
-        id: check
-        run: |
-          # 200 => that exact version exists already (skip). 404 => new project
-          # or new version (publish).
-          CODE=$(curl -s -o /dev/null -w '%{http_code}' \
-            "https://pypi.org/pypi/${PKG}/${VERSION}/json")
-          if [ "$CODE" = "200" ]; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::${PKG} ${VERSION} already on PyPI — skipping publish"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::${PKG} ${VERSION} is new — will build and publish"
+          # 2. Query PyPI for the latest published version
+          PYPI_LATEST=$(python3 - "$PKG" <<'PY'
+          import json, sys, urllib.request
+          pkg = sys.argv[1]
+          try:
+              with urllib.request.urlopen(f"https://pypi.org/pypi/{pkg}/json", timeout=15) as r:
+                  data = json.loads(r.read())
+          except Exception:
+              data = {}
+          releases = list((data.get("releases") or {}).keys())
+          parse = lambda v: [int(x) for x in v.split(".")]
+          try:
+              latest = max(releases, key=parse)
+          except Exception:
+              latest = "0.0.0"
+          print(latest)
+          PY
+          )
+          echo "::notice::${PKG} PyPI latest: ${PYPI_LATEST}"
+
+          # 3. If source > pypi latest: developer explicitly bumped -- publish as-is
+          IS_NEW=$(python3 - "$SOURCE" "$PYPI_LATEST" <<'PY'
+          import sys
+          parse = lambda v: [int(x) for x in v.split(".")]
+          print("true" if parse(sys.argv[1]) > parse(sys.argv[2]) else "false")
+          PY
+          )
+
+          if [ "$IS_NEW" = "true" ]; then
+            echo "version=${SOURCE}" >> "$GITHUB_OUTPUT"
+            echo "should_publish=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::${PKG} ${SOURCE} > PyPI ${PYPI_LATEST} -- publishing explicit version"
+            exit 0
           fi
-        env:
-          PKG: ${{ matrix.pkg }}
-          VERSION: ${{ steps.ver.outputs.version }}
+
+          # 4. Version already on PyPI -- check for relevant code changes in this push
+          BEFORE="${BEFORE_SHA}"
+          _ZEROS="0000000000000000000000000000000000000000"
+          if [ -z "$BEFORE" ] || [ "$BEFORE" = "$_ZEROS" ]; then
+            CHANGED="first-push"
+          elif [ "$PKG" = "puras" ]; then
+            CHANGED=$(git diff --name-only "$BEFORE" "$HEAD_SHA" \
+              -- 'worker/sdk/puras/' ':!worker/sdk/puras/__init__.py' 2>/dev/null || true)
+          else
+            CHANGED=$(git diff --name-only "$BEFORE" "$HEAD_SHA" \
+              -- 'worker/' ':!worker/sdk/' ':!worker/__init__.py' 2>/dev/null || true)
+          fi
+
+          if [ -z "$CHANGED" ]; then
+            echo "should_publish=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::${PKG} -- no relevant code changes in this push, skipping"
+            exit 0
+          fi
+
+          # 5. Auto-bump: max(pypi_latest, source) + 1 minor (written inline, never committed)
+          NEXT=$(python3 - "$PYPI_LATEST" "$SOURCE" <<'PY'
+          import sys
+          parse = lambda v: [int(x) for x in v.split(".")]
+          pypi = parse(sys.argv[1])
+          src  = parse(sys.argv[2])
+          base = pypi if pypi > src else src
+          print(f"{base[0]}.{base[1]+1}.0")
+          PY
+          )
+
+          python3 - "$VERSION_FILE" "$NEXT" <<'PY'
+          import re, sys
+          path, ver = sys.argv[1], sys.argv[2]
+          src = open(path, encoding="utf-8").read()
+          src = re.sub(
+              r"""(__version__\s*=\s*[\"'])[^\"']+([\"'])""",
+              rf"\g<1>{ver}\g<2>", src, count=1
+          )
+          open(path, "w", encoding="utf-8").write(src)
+          PY
+
+          echo "version=${NEXT}" >> "$GITHUB_OUTPUT"
+          echo "should_publish=true" >> "$GITHUB_OUTPUT"
+          echo "::notice::${PKG} auto-bumped ${SOURCE} -> ${NEXT} (code changed, version not bumped)"
 
       - name: Build sdist + wheel
-        if: steps.check.outputs.exists == 'false'
+        if: steps.resolve.outputs.should_publish == 'true'
         working-directory: ${{ matrix.dir }}
         run: |
           python -m pip install --upgrade build
           python -m build --outdir dist .
 
       - name: Publish to PyPI
-        if: steps.check.outputs.exists == 'false'
+        if: steps.resolve.outputs.should_publish == 'true'
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: ${{ matrix.dir }}/dist
           print-hash: true
 
 # ---------------------------------------------------------------------------
-# One-time PyPI setup (per project — do this once, in the PyPI web UI):
+# One-time PyPI setup (per project -- in the PyPI web UI):
 #
-#   For EACH project (`puras-runner` and `puras`):
-#     PyPI -> your project -> Settings -> Publishing -> "Add a pending publisher"
-#     (or, if the project doesn't exist yet, Account -> Publishing -> add a
-#      *pending* publisher so the very first upload can create it), with:
-#         Owner:            PurasAI
-#         Repository:       puras
-#         Workflow name:    publish.yml
-#         Environment:      (leave blank)
+#   PyPI -> project -> Settings -> Publishing -> "Add a pending publisher":
+#     Owner: PurasAI  |  Repo: puras  |  Workflow: publish.yml  |  Env: (blank)
 #
-# After that, merging a version bump to main publishes automatically.
+# Do this for both `puras` and `puras-runner`.
 # ---------------------------------------------------------------------------
