@@ -2,23 +2,22 @@
 
 # Puras — local skill runner
 
-**Run [Puras](https://puras.co) AI skills on your own machine, on your own LLM key — no account.**
+**Run AI skills on your own machine, on your own LLM key — no account.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![PyPI](https://img.shields.io/pypi/v/puras.svg)](https://pypi.org/project/puras/)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 
-[Docs](https://puras.co/docs) · [Cloud](https://puras.co) · [Examples](./examples) · [Build a skill](#build-your-own-skill)
+[Docs](https://puras.co/docs) · [Examples](./examples) · [What's a skill?](#whats-a-skill) · [Build a skill](#build-your-own-skill)
 
 </div>
 
 ---
 
-A **skill** is a small folder — a prompt, an input/output schema, optional Python
-tools, and evals — that an agent runs end to end. This is the open-source runner
-that executes one entirely **on your laptop**: no Postgres, no bucket, no platform
-API, no sign-up. It's the *same* agent loop the hosted platform runs (one loop,
-two environments), so a skill behaves identically locally and in prod.
+This is the open-source runner that executes a Puras **skill** entirely on your
+laptop: no Postgres, no bucket, no platform API, no sign-up. It's the *same*
+agent loop the hosted platform runs (one loop, two environments), so a skill
+behaves identically locally and in prod.
 
 ```bash
 pip install "puras[local]"
@@ -26,44 +25,90 @@ puras run --local greeter --dir ./examples/hello-world -i name=Ada
 ```
 
 - 🧑‍💻 **Local-first** — run and iterate on a skill before deploying anything.
-- 🔌 **Local API** — `puras serve` exposes the hosted job API on `localhost`, so you build and test your app offline before you deploy.
-- 🔑 **Bring your own key** — your provider, your bill, nothing billed by a platform.
+- 🔌 **Local API** — `puras serve` exposes the hosted job API on `localhost`, so you build and test your app offline.
+- 🔑 **Bring your own key** — your provider, your bill. If a key isn't set, the CLI asks for it.
 - 🪶 **Dependency-light** — the offline path needs no DB/bucket/openai stack.
-- 🔁 **Prod parity** — the same loop and contracts as [Puras Cloud](https://puras.co).
+- 🔁 **Prod parity** — the same loop and contracts as the hosted platform.
 
-## Getting started
+## What's a skill?
 
-### Run it locally
+A **skill** is a small folder that an agent runs end to end. At its simplest
+it's two files — a prompt and an input/output contract:
 
-The whole point of this repo — a skill's agent loop on your machine, on your key:
-
-```bash
-pip install "puras[local]"        # the puras CLI + the offline runner
-
-# the bundled "hello world" skillpack has two skills: greeter + formatter
-puras run --local greeter --dir ./examples/hello-world -i name="the Puras team"
+```
+summarize/
+  SKILL.md      # the prompt — the agent's instructions
+  skill.yaml    # the contract — input/output schema (+ optional model, tools, evals)
 ```
 
-It's **BYO key**: you call the provider directly and pay your own bill. The CLI
-reads your key from `$ANTHROPIC_API_KEY` (or the `--api-key` flag) and, if
-neither is set, prompts for it in the terminal.
+`skill.yaml` declares what goes in and what comes out:
 
-From a checkout of this repo instead of PyPI:
+```yaml
+title: Summarizer
+description: Condense a block of text into two plain sentences.
+entrypoint: SKILL.md          # markdown entrypoint = agentic (the file is the system prompt)
 
-```bash
-pip install -e .             # puras-runner (the runtime)
-pip install -e worker/sdk    # the puras CLI + SDK
+input_schema:
+  type: object
+  required: [text]
+  properties:
+    text:
+      type: string
+      description: The text to condense.
+
+output_schema:
+  type: object
+  properties:
+    summary:
+      type: text
+      description: A two-sentence summary.
 ```
 
-### …or use Puras Cloud (recommended for production)
+`SKILL.md` is the system prompt the agent runs with:
 
-The fastest way to run a skill with the **full tool surface** — media generation,
-web search/fetch, shared memory, persistent storage, durable resume, and
-eval suites at scale — is to [sign up free at puras.co](https://puras.co). No
-infrastructure to manage, automatic scaling, and a one-line MCP connect for
-Claude Code. The local runner here gives you the free, offline core; Cloud adds
-the managed, hosted surface for when you ship. The [comparison below](#open-source-vs-cloud)
-spells out exactly which is which.
+```markdown
+You summarize text. Read the `text` input, then call `set_output` once with a
+`summary` of at most two plain sentences. Don't add opinions or extra detail.
+```
+
+That's a complete skill. Run it locally:
+
+```bash
+puras run --local summarize --dir ./my-skillpack -i text="...the article..."
+```
+
+Events stream to your console as the agent works; the final JSON output prints
+at the end. A skill can grow from here — declare Python `tools:` the agent can
+call, hand stages to isolated subagents, add `evals:` — but two files is the
+floor.
+
+### From skill to product pipeline
+
+A skill is one stage; a **pipeline** is your app orchestrating skills behind a
+real API. You don't rewrite anything to get there — `puras serve` stands up the
+exact job API your app will call in production, backed by the local runner:
+
+```bash
+puras serve --dir ./my-skillpack          # → http://127.0.0.1:8787
+```
+
+Now your app calls the skill over HTTP, the same way every stage of a pipeline
+does. Chain a few skills (`extract` → `summarize` → `publish`) and you have a
+pipeline — each one a folder, each one independently runnable and testable:
+
+```python
+import puras
+
+client = puras.Client(api_key="local", api_base="http://127.0.0.1:8787", skillpack="local")
+
+text = fetch_article(url)                       # your code
+summary = client.run("summarize", {"text": text})["summary"]
+post = client.run("write_post", {"summary": summary})
+```
+
+The only thing that changes when you ship is the base URL: point the client at
+`https://api.puras.co`, `puras deploy`, and the **same app code** runs against
+the managed platform.
 
 ## Run a skill
 
@@ -75,10 +120,20 @@ puras run --local <skill> --dir <skillpack> -i KEY=VALUE [-i KEY2=VALUE2 ...]
 - `--dir` — the skillpack bundle root (a folder of `<skill>/skill.yaml`). Defaults to `.`.
 - `-i KEY=VALUE` — an input, repeatable; validated against the skill's `input_schema`.
 - `--model claude/sonnet-4-6` — override the skill's model for this run.
-- `--api-key sk-...` — your LLM key, if it isn't already in the environment.
 
-Events stream to your console as the agent works; the final JSON output and a
-token tally (informational — you paid your provider, not Puras) print at the end.
+The bundled `hello-world` skillpack has two skills to start from — `greeter`
+(agentic) and `formatter` (deterministic):
+
+```bash
+puras run --local greeter --dir ./examples/hello-world -i name="the Puras team"
+```
+
+From a checkout of this repo instead of PyPI:
+
+```bash
+pip install -e .             # puras-runner (the runtime)
+pip install -e worker/sdk    # the puras CLI + SDK
+```
 
 Programmatic use is the same loop:
 
@@ -99,7 +154,7 @@ puras eval --local content-repurposer --dir ./examples/content-studio --threshol
 ```
 
 `check` / `exact_match` / `schema` graders run free; a `rubric` (LLM-as-judge)
-grader runs on your BYO key. `--threshold N` is a CI gate — non-zero exit if the
+grader runs on your key. `--threshold N` is a CI gate — non-zero exit if the
 pass-rate is below `N`.
 
 ## Build your app against a local API
@@ -115,7 +170,7 @@ puras serve --dir ./examples/hello-world          # → http://127.0.0.1:8787
 It mirrors the hosted **job API** (`POST /v1/jobs`, `GET /v1/jobs/{id}`,
 `…/events`, `…/spans`) backed by the offline runner — in-memory, zero extra
 dependencies. Point any Puras SDK at it by changing one thing — the base URL —
-and your app runs unchanged, offline, on your own key:
+and your app runs unchanged, offline:
 
 ```python
 import puras
@@ -139,11 +194,9 @@ curl -s "http://127.0.0.1:8787/v1/jobs?wait=true" \
   -d '{"skill": "greeter", "inputs": {"name": "Ada"}}'
 ```
 
-When you ship, change the base URL to `https://api.puras.co` and `puras deploy` —
-the **same app code** now runs against the managed platform. Auth is open
-locally; `--require-key <token>` emulates API-key auth, and `--host` / `--port`
-change where it binds. (The Python and React-Native SDKs poll, so they work
-as-is; live SSE streaming is a Cloud feature.)
+Auth is open locally; `--require-key <token>` emulates API-key auth, and
+`--host` / `--port` change where it binds. (The Python and React-Native SDKs
+poll, so they work as-is; live SSE streaming is a hosted feature.)
 
 ## Build your own skill
 
@@ -162,9 +215,8 @@ my-skillpack/
     tools/...         # optional deterministic Python tools the agent can call
 ```
 
-When you're happy, the same bundle deploys to [Puras Cloud](https://puras.co)
-unchanged. See the [docs](https://puras.co/docs) to deploy and call skills over
-the API.
+When you're happy, the same bundle deploys to the hosted platform unchanged.
+See the [docs](https://puras.co/docs) to deploy and call skills over the API.
 
 ## Open-source vs Cloud
 
@@ -181,43 +233,23 @@ crippled core — it's the capabilities that need real infrastructure.
 | Agent loop & local tools     | ✓ text, `bash`, file tools, your Python tools, in-process subagents | ✓ same loop                |
 | Job API for your app         | ✓ `puras serve` — the job API on localhost | ✓ api.puras.co — managed, scaled, durable     |
 | Evals (`check`/`schema`/`rubric`) | ✓ per run + offline suites           | ✓ + suites at scale, CI gating, version diffs  |
-| Media (image/video/audio)    | ✓ `generate_*` with a Fal key (BYO, direct to Fal) | ✓ generation + persistence (bucket-backed)     |
-| Web search / fetch / browser | ✓ search (your Anthropic key) + fetch     | ✓ search / fetch / browser screenshots         |
+| Media (image/video/audio)    | ✓ `generate_*` direct to the provider     | ✓ generation + persistence (bucket-backed)     |
+| Web search / fetch / browser | ✓ search + fetch                          | ✓ search / fetch / browser screenshots         |
 | Shared memory                | ✓ persistent, local SQLite                | ✓ persistent, workspace-scoped + semantic (pgvector) |
 | Persistent storage           | —                                         | ✓ bucket-backed drive                          |
 | Durable resume               | —                                         | ✓ checkpointed, survives worker restarts       |
+| Hindsight (retrospectives)   | —                                         | ✓ mines stored run traces for recurring inefficiencies, surfaces fixes |
 | Budgets, tracing, dashboard  | console events + a token tally            | ✓ spend budgets, OTel spans, run timelines     |
 | Marketplace & sharing        | —                                         | ✓                                              |
 | Support                      | [Issues](../../issues) & [Discussions](../../discussions) | priority / SLA              |
 
-The hosted-only tools (`worker/agent_runner.py:PLATFORM_ONLY_TOOLS`) are simply
-not offered to the model offline, so a skill that needs them still runs — it just
-won't see those tools locally. The exceptions are the three that have a BYO-key
-direct path (see below): the media `generate_*` verbs and `web_search` /
-`web_fetch`. The included examples (`hello-world`, `skillpack-template`,
-`content-studio`) use only the local surface and run end-to-end offline.
-
-**Media and web work offline too (BYO keys).** The hosted platform owns a Fal
-key, a bucket, and a web service; the local runner instead reaches the same
-providers on *your* keys, with no platform in between. Set `FAL_KEY` and the
-`generate_image` / `generate_video` / `generate_audio` / `transcribe` verbs call
-Fal directly (`worker/media_local.py`) — same verb resolution and result shape
-as hosted, the output landing on your local drive (no bucket, no billing). And
-`web_fetch` runs as a plain HTTP GET while `web_search` runs through Anthropic's
-server-side web-search tool on your `ANTHROPIC_API_KEY` (`worker/web_local.py`),
-so a skill that researches the web works the same locally as in prod. Hosted adds
-managed billing, persistence to a bucket-backed drive, image search, and headless
-browser screenshots on top.
-
-**Workspace memory works offline too.** The `memory_search` / `memory_get` /
-`memory_put` / `memory_forget` tools and the job-start memory injection are
-backed by a local SQLite file (`worker/memory_store_sqlite.py`) — the same
-agent-facing contract and the same hybrid ranking (exact identity + lexical,
-RRF-fused and shaped by recency × importance) as the hosted Postgres store, just
-without the pgvector semantic arm. So a skill's "shared brain" persists across
-`puras run --local` invocations. The DB lives next to the local drive root by
-default; point it anywhere with `PURAS_LOCAL_MEMORY_PATH`. Hosted memory adds
-semantic (embedding) retrieval and cross-workspace scope on top.
+The local runner gives you the free, offline core; the hosted platform adds the
+managed surface — persistence, scale, durable resume, retrospectives — for when
+you ship. Most tools work the same in both places: media and web run on your own
+keys locally and through the managed services in the cloud, and workspace memory
+persists across `puras run --local` invocations in a local SQLite store. The
+included examples (`hello-world`, `skillpack-template`, `content-studio`) use
+only the local surface and run end-to-end offline.
 
 ## How it works
 
