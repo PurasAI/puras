@@ -14,21 +14,26 @@
 
 ---
 
-Puras runs AI **skills** — small, self-contained folders that an agent executes
-end to end. Define a skill once, then run it from the command line:
+Puras turns a prompt into a reusable, testable, deployable **skill** — and runs
+it on your own machine.
+
+You can already fire a prompt at an LLM SDK and get a string back. The problem is
+everything around it: validating inputs, wiring up tool calls, multi-step
+orchestration, forcing structured output, retries, and tests — glue code you
+write and maintain per prompt. A skill is that prompt promoted to a real unit:
+
+- a typed **input/output contract** — schema-validated in, schema-valid JSON out, every time;
+- the **tools and sub-steps** the agent may use, declared in one place;
+- **evals** that test the prompt like code, with a CI gate;
+- one folder you run from the CLI today and **deploy to production unchanged** tomorrow.
 
 ```bash
 pip install "puras[local]"
-puras run --local greeter --dir ./examples/hello-world -i name=Ada
 ```
-
-Iterate on a skill from the CLI, serve it over HTTP to build your app against,
-and gate it with evals.
 
 ## What's a skill?
 
-A **skill** is a small folder that an agent runs end to end. At its simplest
-it's two files — a prompt and an input/output contract:
+At its simplest, a skill is two files — a prompt and an input/output contract:
 
 ```
 summarize/
@@ -66,11 +71,16 @@ You summarize text. Read the `text` input, then call `set_output` once with a
 `summary` of at most two plain sentences. Don't add opinions or extra detail.
 ```
 
-That's a complete skill. Run it locally:
+That's a complete skill — nothing else required. To watch one run, try the
+example skillpack that ships in this repo:
 
 ```bash
-puras run --local summarize --dir ./my-skillpack -i text="...the article..."
+puras run --local greeter --dir ./examples/hello-world -i name=Ada
 ```
+
+- `greeter` — the skill to run
+- `--dir ./examples/hello-world` — the skillpack folder it lives in
+- `-i name=Ada` — an input named in the skill's `input_schema`
 
 Events stream to your console as the agent works; the final JSON output prints
 at the end. A skill can grow from here — declare Python `tools:` the agent can
@@ -116,12 +126,8 @@ puras run --local <skill> --dir <skillpack> -i KEY=VALUE [-i KEY2=VALUE2 ...]
 - `-i KEY=VALUE` — an input, repeatable; validated against the skill's `input_schema`.
 - `--model claude/sonnet-4-6` — override the skill's model for this run.
 
-The bundled `hello-world` skillpack has two skills to start from — `greeter`
-(agentic) and `formatter` (deterministic):
-
-```bash
-puras run --local greeter --dir ./examples/hello-world -i name="the Puras team"
-```
+The bundled `hello-world` skillpack (used above) has two skills to start from —
+`greeter` (agentic) and `formatter` (deterministic).
 
 From a checkout of this repo instead of PyPI:
 
