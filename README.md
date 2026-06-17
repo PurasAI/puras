@@ -19,15 +19,19 @@ on your own machine.
 
 ## Why Puras?
 
-You can already fire a prompt at an LLM SDK and get a string back. The problem is
-everything around it: validating inputs, wiring up tool calls, multi-step
-orchestration, forcing structured output, retries, and tests — glue code you
-write and maintain per prompt. A skill is that prompt promoted to a real unit:
+You can already fire a prompt at an LLM SDK — or an agentic one that wires up
+tool calls for you — and get an answer back. The hard part is everything around
+it: persisting **memory** across runs, orchestrating **long-running, multi-step
+pipelines**, and surviving the **expensive failure** — the run that burns through
+a dozen costly steps and then dies on the last one, throwing away everything
+before it. Add schema-validating the output and testing the whole thing so it
+doesn't silently regress, and you're maintaining a pile of glue code and
+infrastructure per prompt. A skill is that prompt promoted to a real unit:
 
 - a typed **input/output contract** — schema-validated in, schema-valid JSON out, every time;
-- the **tools and sub-steps** the agent may use, declared in one place;
+- **memory that persists across runs** — a local SQLite store on your laptop, semantic recall on the platform;
 - **evals** that test the prompt like code, with a CI gate;
-- **one loop, two environments** — the same agent loop runs offline and hosted, so you build against a local API and **ship the identical bundle to production** with `puras deploy`.
+- **one loop, two environments** — build against a local API and ship the identical bundle with `puras deploy`; in production, long runs are checkpointed, so a step that fails near the end resumes instead of re-running everything before it.
 
 If all you need is a single completion, reach for the SDK — Puras earns its place
 the moment a prompt becomes something you run repeatedly, test, and ship.
