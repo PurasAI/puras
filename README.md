@@ -8,14 +8,16 @@
 [![PyPI](https://img.shields.io/pypi/v/puras.svg)](https://pypi.org/project/puras/)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 
-[Docs](https://puras.co/docs) · [Examples](./examples) · [What's a skill?](#whats-a-skill) · [Build a skill](#build-your-own-skill)
+[Why Puras?](#why-puras) · [What's a skill?](#whats-a-skill) · [Docs](https://puras.co/docs) · [Examples](./examples) · [Build a skill](#build-your-own-skill)
 
 </div>
 
 ---
 
-Puras turns a prompt into a reusable, testable, deployable **skill** — and runs
-it on your own machine.
+Puras turns a prompt into a typed, testable, deployable **skill** — and runs it
+on your own machine.
+
+## Why Puras?
 
 You can already fire a prompt at an LLM SDK and get a string back. The problem is
 everything around it: validating inputs, wiring up tool calls, multi-step
@@ -25,11 +27,10 @@ write and maintain per prompt. A skill is that prompt promoted to a real unit:
 - a typed **input/output contract** — schema-validated in, schema-valid JSON out, every time;
 - the **tools and sub-steps** the agent may use, declared in one place;
 - **evals** that test the prompt like code, with a CI gate;
-- one folder you run from the CLI today and **deploy to production unchanged** tomorrow.
+- **one loop, two environments** — the same agent loop runs offline and hosted, so you build against a local API and **ship the identical bundle to production** with `puras deploy`.
 
-```bash
-pip install "puras[local]"
-```
+If all you need is a single completion, reach for the SDK — Puras earns its place
+the moment a prompt becomes something you run repeatedly, test, and ship.
 
 ## What's a skill?
 
@@ -71,10 +72,11 @@ You summarize text. Read the `text` input, then call `set_output` once with a
 `summary` of at most two plain sentences. Don't add opinions or extra detail.
 ```
 
-That's a complete skill — nothing else required. To watch one run, try the
-example skillpack that ships in this repo:
+That's a complete skill — nothing else required. To watch one run, install Puras
+and try the example skillpack that ships in this repo:
 
 ```bash
+pip install "puras[local]"
 puras run --local greeter --dir ./examples/hello-world -i name=Ada
 ```
 
