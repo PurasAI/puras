@@ -178,42 +178,8 @@ def build_parser() -> argparse.ArgumentParser:
     edp.add_argument("--head", required=True, help="candidate: a version number or a suite id")
     edp.add_argument("--json", action="store_true", help="print the full diff as JSON")
 
-    op = add("optimize", c.cmd_optimize, "optimize a skill's prompt against its eval suite")
-    op.add_argument(
-        "skill", nargs="?",
-        help="skill name (resolved from --app / puras.yaml; "
-        "optional with --local when the bundle has one skill)",
-    )
-    op.add_argument("--app", "--skillpack", dest="skillpack", help="skill id (default: puras.yaml binding)")
-    op.add_argument("--version", type=int, help="pin to a deployment version (default: active)")
-    op.add_argument("--max-candidates", dest="max_candidates", type=int, default=8,
-                    help="candidate prompts proposed per round (default 8)")
-    op.add_argument("--max-rounds", dest="max_rounds", type=int, default=3,
-                    help="propose→prune iterations (default 3)")
-    op.add_argument("--minibatch", dest="minibatch", type=int, default=5,
-                    help="cases in the cheap first-round screen (default 5)")
-    op.add_argument("--repeat", type=int, default=1, help="runs per case in the confirm pass (default 1)")
-    op.add_argument("--threshold", dest="threshold", type=float, default=0.0,
-                    help="min mean_score gain (0-100) for a winner to beat the baseline (default 0)")
-    op.add_argument("--budget", type=float, help="hosted: max USD to spend across the run")
-    op.add_argument("--json", action="store_true", help="print the full report as JSON")
-    op.add_argument("--async", dest="async_", action="store_true", help="kick off and return; don't wait")
-    op.add_argument("--timeout", type=int, default=1800, help="max seconds to wait (default 1800)")
-    op.add_argument("--interval", type=float, default=5.0, help="poll interval seconds (default 5)")
-    # Offline mode: run the optimization locally with no platform, on your own LLM key.
-    op.add_argument(
-        "--local", action="store_true",
-        help="optimize OFFLINE on a local bundle, on your own LLM key",
-    )
-    op.add_argument("--dir", help="bundle dir for --local (default: current directory)")
-    op.add_argument(
-        "--api-key", dest="api_key",
-        help="LLM key for --local (default: $ANTHROPIC_API_KEY)",
-    )
-
-    orp = add("optimize-report", c.cmd_optimize_report, "show an optimization run report by id")
-    orp.add_argument("run_id")
-    orp.add_argument("--json", action="store_true", help="print the full report as JSON")
+    # Hindsight (retrospective run analysis) is a CLOUD-ONLY feature — it mines the
+    # platform's stored run traces, so there is no local CLI surface for it.
 
     secp = sub.add_parser("secrets", help="manage your skill's secrets")
     secp.set_defaults(func=lambda _a: secp.print_help())

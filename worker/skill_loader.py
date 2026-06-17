@@ -164,8 +164,8 @@ def load(manifest: Manifest, deployment_root: Path, name: str) -> LoadedSkill:
 
 
 def apply_prompt_override(loaded: LoadedSkill, override: dict[str, Any] | None) -> LoadedSkill:
-    """Return a copy of `loaded` with the optimizer's candidate prompt/model/routing
-    swapped in (the candidate-injection seam).
+    """Return a copy of `loaded` with a candidate prompt/model/routing swapped in
+    (the candidate-injection seam used by eval suites + the deploy gate).
 
     Override shape: `{system_prompt?, model?, routing?}`. A key that is PRESENT is
     applied (None clears it — e.g. `routing: None` disables escalation); a key that
