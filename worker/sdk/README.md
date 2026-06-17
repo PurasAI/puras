@@ -51,6 +51,7 @@ PURAS_API_KEY=puras_live_… puras deploy --skillpack <id>
 | `puras activate <version\|id>` | make a deployment the active one |
 | `puras run <skill> -i k=v` | submit a job and wait (`--async`, `--json`) |
 | `puras logs <job_id>` | stream a job's events until it finishes |
+| `puras feedback <job_id> --up\|--down` | rate a result (👍/👎 + `--comment`) so you can see which skills run well |
 | `puras secrets set/ls/rm` | manage skillpack secrets |
 | `puras pull` | download the active bundle |
 

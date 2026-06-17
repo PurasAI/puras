@@ -130,6 +130,7 @@ puras deploy                     # zip this dir + push a deployment
                                  # (creates the skillpack on first push)
 puras run <skill> -i key=value   # submit a job and wait
 puras logs <job_id>              # stream a job's events
+puras feedback <job_id> --up     # rate a result (👍/👎 + --comment)
 ```
 
 ## References
