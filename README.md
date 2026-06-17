@@ -48,21 +48,27 @@ A skill is a folder — a prompt and an input/output contract. Create two files.
 `skill.yaml` declares what goes in and what comes out:
 
 ```yaml
-# summarize/skill.yaml
-title: Summarizer
-description: Condense a block of text into two plain sentences.
+# triage/skill.yaml
+title: Ticket Triage
+description: Sort an inbound support message into a category, priority, and summary.
 entrypoint: SKILL.md          # markdown entrypoint = agentic; the file is the system prompt
 
 input_schema:
   type: object
-  required: [text]
+  required: [message]
   properties:
-    text:
+    message:
       type: string
 
 output_schema:
   type: object
   properties:
+    category:
+      type: string
+      enum: [bug, billing, feature_request, other]
+    priority:
+      type: string
+      enum: [low, medium, high, urgent]
     summary:
       type: text
 ```
@@ -70,9 +76,10 @@ output_schema:
 `SKILL.md` is the system prompt the agent runs with:
 
 ```markdown
-<!-- summarize/SKILL.md -->
-You summarize text. Read the `text` input and call `set_output` once with a
-`summary` of at most two plain sentences — no opinions, no extra detail.
+<!-- triage/SKILL.md -->
+You triage inbound support messages. Read the `message`, then call `set_output`
+once with its `category`, `priority`, and a one-line `summary`. Judge priority by
+user impact, not by how loud the message is.
 ```
 
 Serve it. `puras serve` exposes the same job API your app will hit in
@@ -89,23 +96,23 @@ Now call the skill from your app — point any Puras SDK at the local base URL:
 import puras
 
 client = puras.Client(api_key="local", api_base="http://127.0.0.1:8787", skillpack="local")
-out = client.run("summarize", {"text": "...a long article..."})
-print(out["summary"])
+out = client.run("triage", {"message": "I was charged twice this month and want a refund!"})
+print(out["category"], out["priority"])   # → billing high
 ```
 
 ```ts
 import { Puras } from "puras";
 
 const puras = new Puras({ apiKey: "local", apiBase: "http://127.0.0.1:8787", skillpack: "local" });
-const { summary } = await puras.run("summarize", { text: "...a long article..." });
-console.log(summary);
+const { category, priority } = await puras.run("triage", { message: "I was charged twice this month and want a refund!" });
+console.log(category, priority);   // → billing high
 ```
 
 That's the whole loop. When you ship, change the base URL to
 `https://api.puras.co`, run `puras deploy`, and the **same app code** runs
 against the managed platform — nothing else changes.
 
-> Want to iterate faster? `puras run --local summarize -i text="…"` runs a skill
+> Want to iterate faster? `puras run --local triage -i message="…"` runs a skill
 > straight from the CLI, `puras eval --local` gates it on evals, and the
 > [`examples/`](./examples) folder has ready-to-run skillpacks.
 
