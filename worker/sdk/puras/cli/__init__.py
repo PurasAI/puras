@@ -178,8 +178,25 @@ def build_parser() -> argparse.ArgumentParser:
     edp.add_argument("--head", required=True, help="candidate: a version number or a suite id")
     edp.add_argument("--json", action="store_true", help="print the full diff as JSON")
 
-    # Hindsight (retrospective run analysis) is a CLOUD-ONLY feature — it mines the
-    # platform's stored run traces, so there is no local CLI surface for it.
+    # Hindsight (retrospective run analysis) is a CLOUD feature — it mines the
+    # platform's stored run traces. These commands drive the hosted API; there is
+    # no --local mode.
+    hs = add("hindsight", c.cmd_hindsight, "analyze a skill's recent runs for recurring inefficiencies")
+    hs.add_argument("skill", help="skill name to analyze")
+    hs.add_argument("--app", "--skillpack", dest="skillpack", help="skill id (default: puras.yaml binding)")
+    hs.add_argument("--wait", action="store_true", help="wait for the report and print it")
+    hs.add_argument("--timeout", type=int, default=600, help="max seconds to wait with --wait (default 600)")
+    hs.add_argument("--interval", type=float, default=5.0, help="poll interval seconds (default 5)")
+    hs.add_argument("--json", action="store_true", help="print the run/report as JSON")
+
+    hsl = add("hindsight-list", c.cmd_hindsight_list, "list/search past Hindsight retrospectives")
+    hsl.add_argument("--app", "--skillpack", dest="skillpack", help="skill id (default: puras.yaml binding)")
+    hsl.add_argument("--skill", help="filter to one skill")
+    hsl.add_argument("--json", action="store_true", help="print as JSON")
+
+    hss = add("hindsight-show", c.cmd_hindsight_show, "read one Hindsight report by run id")
+    hss.add_argument("run_id")
+    hss.add_argument("--json", action="store_true", help="print the full report as JSON")
 
     secp = sub.add_parser("secrets", help="manage your skill's secrets")
     secp.set_defaults(func=lambda _a: secp.print_help())

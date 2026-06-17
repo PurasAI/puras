@@ -884,6 +884,114 @@ def cmd_eval_diff(args) -> None:
     ok("no pass-rate regression")
 
 
-# Note: the prompt-optimizer CLI (`puras optimize` / `optimize-report`) was
-# retired along with the optimizer; its successor, Hindsight, is a CLOUD-ONLY
-# feature (it analyzes the platform's stored run traces) and has no local command.
+# --- hindsight ---------------------------------------------------------------
+# Hindsight replaced the prompt optimizer. It is a CLOUD feature (it mines the
+# platform's stored run traces), so these commands drive the hosted API — there
+# is no `--local` mode. Trigger a retrospective, search/list past runs, read a
+# report; nothing is ever applied automatically.
+
+
+def _print_hindsight_report(rep: dict) -> None:
+    info(
+        f"{bold('Hindsight')} {rep.get('skill_name')}  ·  status {rep.get('status', '?')}"
+        f"  ·  {rep.get('jobs_analyzed', 0)} runs analyzed"
+    )
+    findings = rep.get("findings") or []
+    if not findings:
+        if rep.get("status") == "succeeded":
+            ok("no recurring inefficiencies found 🎉")
+        else:
+            info("(no findings yet — the run is still in progress)")
+        return
+    rows = [
+        [
+            f.get("severity"),
+            f.get("family"),
+            f.get("kind"),
+            (f.get("recommendation") or f.get("title") or "")[:64],
+        ]
+        for f in findings
+    ]
+    table(rows, ["severity", "family", "kind", "recommendation"])
+    info("  → report only; review each finding and apply the fix by hand")
+
+
+def cmd_hindsight(args) -> None:
+    """`puras hindsight <skill>` — trigger a retrospective over a skill's recent runs."""
+    if not args.skill:
+        raise CliError("hindsight requires a skill name")
+    client = _client()
+    try:
+        sid = _skillpack_id(args)
+        rep = client.post(
+            f"/v1/skillpacks/{sid}/hindsight", json_body={"skill": args.skill}
+        )
+        run_id = rep["id"]
+        ok(f"Started Hindsight {run_id}")
+        if not args.wait:
+            info(f"  read it with: puras hindsight-show {run_id}")
+            if args.json:
+                print(json.dumps(rep, indent=2))
+            return
+        terminal = ("succeeded", "failed", "cancelled")
+        deadline = time.time() + args.timeout
+        last = None
+        while True:
+            rep = client.get(f"/v1/hindsight/{run_id}")
+            if rep["status"] != last:
+                info(dim(f"  … {rep['status']}"))
+                last = rep["status"]
+            if rep["status"] in terminal:
+                break
+            if time.time() > deadline:
+                info(f"(timeout) still going — `puras hindsight-show {run_id}`")
+                return
+            time.sleep(args.interval)
+    finally:
+        client.close()
+    if args.json:
+        print(json.dumps(rep, indent=2))
+    else:
+        _print_hindsight_report(rep)
+
+
+def cmd_hindsight_list(args) -> None:
+    """`puras hindsight-list [--skill X]` — list/search past retrospectives."""
+    client = _client()
+    try:
+        sid = _skillpack_id(args)
+        params = {"skill": args.skill} if args.skill else None
+        runs = client.get(f"/v1/skillpacks/{sid}/hindsight", params=params)
+    finally:
+        client.close()
+    if args.json:
+        print(json.dumps(runs, indent=2))
+        return
+    if not runs:
+        info("no retrospectives yet")
+        return
+    rows = [
+        [
+            r.get("id"),
+            r.get("skill_name"),
+            r.get("status"),
+            r.get("jobs_analyzed"),
+            (r.get("stats") or {}).get("n_findings", 0),
+            r.get("trigger"),
+        ]
+        for r in runs
+    ]
+    table(rows, ["id", "skill", "status", "runs", "findings", "trigger"])
+
+
+def cmd_hindsight_show(args) -> None:
+    """`puras hindsight-show <run_id>` — read one retrospective report."""
+    client = _client()
+    try:
+        rep = client.get(f"/v1/hindsight/{args.run_id}")
+    finally:
+        client.close()
+    if args.json:
+        print(json.dumps(rep, indent=2))
+    else:
+        _print_hindsight_report(rep)
