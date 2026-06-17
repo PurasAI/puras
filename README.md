@@ -2,7 +2,7 @@
 
 # Puras — local skill runner
 
-**Run AI skills on your own machine, on your own LLM key — no account.**
+**Run AI skills end to end on your own machine.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![PyPI](https://img.shields.io/pypi/v/puras.svg)](https://pypi.org/project/puras/)
@@ -14,21 +14,16 @@
 
 ---
 
-This is the open-source runner that executes a Puras **skill** entirely on your
-laptop: no Postgres, no bucket, no platform API, no sign-up. It's the *same*
-agent loop the hosted platform runs (one loop, two environments), so a skill
-behaves identically locally and in prod.
+Puras runs AI **skills** — small, self-contained folders that an agent executes
+end to end. Define a skill once, then run it from the command line:
 
 ```bash
 pip install "puras[local]"
 puras run --local greeter --dir ./examples/hello-world -i name=Ada
 ```
 
-- 🧑‍💻 **Local-first** — run and iterate on a skill before deploying anything.
-- 🔌 **Local API** — `puras serve` exposes the hosted job API on `localhost`, so you build and test your app offline.
-- 🔑 **Bring your own key** — your provider, your bill. If a key isn't set, the CLI asks for it.
-- 🪶 **Dependency-light** — the offline path needs no DB/bucket/openai stack.
-- 🔁 **Prod parity** — the same loop and contracts as the hosted platform.
+Iterate on a skill from the CLI, serve it over HTTP to build your app against,
+and gate it with evals.
 
 ## What's a skill?
 
