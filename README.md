@@ -45,7 +45,8 @@ pip install "puras[local]"
 ```
 
 A skill is a folder — a prompt and an input/output contract. Create two files.
-`skill.yaml` declares what goes in and what comes out:
+`skill.yaml` declares the contract as plain JSON Schema — the inputs it takes and
+the fields it must return:
 
 ```yaml
 # triage/skill.yaml
@@ -57,20 +58,14 @@ input_schema:
   type: object
   required: [message]
   properties:
-    message:
-      type: string
+    message: { type: string }
 
 output_schema:
   type: object
   properties:
-    category:
-      type: string
-      enum: [bug, billing, feature_request, other]
-    priority:
-      type: string
-      enum: [low, medium, high, urgent]
-    summary:
-      type: text
+    category: { type: string, enum: [bug, billing, feature_request, other] }
+    priority: { type: string, enum: [low, medium, high, urgent] }
+    summary:  { type: text }   # `text` = multi-line string
 ```
 
 `SKILL.md` is the system prompt the agent runs with:
