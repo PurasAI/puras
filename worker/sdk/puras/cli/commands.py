@@ -884,103 +884,67 @@ def cmd_eval_diff(args) -> None:
     ok("no pass-rate regression")
 
 
-# --- optimize ---------------------------------------------------------------
+# --- hindsight ---------------------------------------------------------------
+# Hindsight replaced the prompt optimizer. It is a CLOUD feature (it mines the
+# platform's stored run traces), so these commands drive the hosted API — there
+# is no `--local` mode. Trigger a retrospective, search/list past runs, read a
+# report; nothing is ever applied automatically.
 
 
-def _print_optimize_report(rep: dict) -> None:
-    base = rep.get("baseline") or {}
-    win = rep.get("winner") or {}
-    art = rep.get("artifact") or {}
-    info(f"{bold('Optimize')} {rep.get('skill')}  ·  status {rep.get('status', rep.get('stop_reason', '?'))}")
-    rows = []
-    for c in rep.get("candidates") or []:
-        tag = "baseline" if c.get("source") == "baseline" else f"r{c.get('round_index')}"
-        if c.get("id") == win.get("id") and art.get("changed"):
-            tag += " ★"
-        rows.append([tag, c.get("model") or "—", c.get("mean_score"),
-                     c.get("pass_rate"), (c.get("rationale") or "")[:48]])
-    if rows:
-        table(rows, ["cand", "model", "mean score", "pass rate", "rationale"])
-    if art.get("changed"):
-        d = art.get("deltas") or {}
-        ok(f"winner improves mean_score by {d.get('mean_score'):+} (pass-rate Δ {d.get('pass_rate'):+})")
-        if art.get("skill_yaml_patch"):
-            info(f"  skill.yaml patch: {art['skill_yaml_patch']}")
-        info("  → review the proposed SKILL.md and apply it with `puras deploy`")
-    else:
-        warn(f"no improvement found — keeping the current prompt "
-             f"({rep.get('stop_reason') or rep.get('status')})")
-
-
-def _optimize_local(args) -> None:
-    """`puras optimize --local` — optimize a skill's prompt offline on your own key."""
-    try:
-        from worker.local_run import LocalRunError
-        from worker.optimizer_local import run_optimize_local
-    except ImportError as e:
-        raise CliError(
-            "the offline runner isn't installed. Run `pip install puras[local]` "
-            f"(or `pip install puras-runner`), then retry `puras optimize --local`. [{e}]"
-        ) from None
-    bundle_dir = args.dir or "."
-    api_key = _resolve_llm_key(args)
-    info(f"optimizing `{args.skill or '(sole skill)'}` from {bundle_dir} — offline, your key")
-    try:
-        rep = run_optimize_local(
-            bundle_dir,
-            skill=args.skill, api_key=api_key,
-            max_candidates=args.max_candidates, max_rounds=args.max_rounds,
-            minibatch_size=args.minibatch, repeat=args.repeat or 1,
-            improvement_threshold=args.threshold or 0.0,
-        )
-    except LocalRunError as e:
-        raise CliError(str(e)) from None
-    if args.json:
-        print(json.dumps(rep, indent=2, default=str))
-    else:
-        _print_optimize_report(rep)
-
-
-def cmd_optimize(args) -> None:
-    if getattr(args, "local", False):
-        _optimize_local(args)
+def _print_hindsight_report(rep: dict) -> None:
+    info(
+        f"{bold('Hindsight')} {rep.get('skill_name')}  ·  status {rep.get('status', '?')}"
+        f"  ·  {rep.get('jobs_analyzed', 0)} runs analyzed"
+    )
+    findings = rep.get("findings") or []
+    if not findings:
+        if rep.get("status") == "succeeded":
+            ok("no recurring inefficiencies found 🎉")
+        else:
+            info("(no findings yet — the run is still in progress)")
         return
+    rows = [
+        [
+            f.get("severity"),
+            f.get("family"),
+            f.get("kind"),
+            (f.get("recommendation") or f.get("title") or "")[:64],
+        ]
+        for f in findings
+    ]
+    table(rows, ["severity", "family", "kind", "recommendation"])
+    info("  → report only; review each finding and apply the fix by hand")
+
+
+def cmd_hindsight(args) -> None:
+    """`puras hindsight <skill>` — trigger a retrospective over a skill's recent runs."""
     if not args.skill:
-        raise CliError("optimize requires a skill name (or use --local)")
+        raise CliError("hindsight requires a skill name")
     client = _client()
-    run_id = None
     try:
         sid = _skillpack_id(args)
-        body: dict = {
-            "skill": args.skill,
-            "max_candidates": args.max_candidates,
-            "max_rounds": args.max_rounds,
-            "minibatch_size": args.minibatch,
-            "repeat": args.repeat or 1,
-            "improvement_threshold": args.threshold or 0.0,
-        }
-        if getattr(args, "version", None) is not None:
-            body["version"] = args.version
-        if getattr(args, "budget", None) is not None:
-            body["budget_micros"] = int(round(args.budget * 1_000_000))
-        rep = client.post(f"/v1/skillpacks/{sid}/optimizations", json_body=body)
+        rep = client.post(
+            f"/v1/skillpacks/{sid}/hindsight", json_body={"skill": args.skill}
+        )
         run_id = rep["id"]
-        ok(f"Started optimization {run_id}")
-        if args.async_:
-            info(f"  follow with: puras optimize-report {run_id}")
+        ok(f"Started Hindsight {run_id}")
+        if not args.wait:
+            info(f"  read it with: puras hindsight-show {run_id}")
+            if args.json:
+                print(json.dumps(rep, indent=2))
             return
-        terminal = ("succeeded", "failed", "cancelled", "budget_exhausted")
+        terminal = ("succeeded", "failed", "cancelled")
         deadline = time.time() + args.timeout
         last = None
         while True:
-            rep = client.get(f"/v1/optimizations/{run_id}")
+            rep = client.get(f"/v1/hindsight/{run_id}")
             if rep["status"] != last:
                 info(dim(f"  … {rep['status']}"))
                 last = rep["status"]
             if rep["status"] in terminal:
                 break
             if time.time() > deadline:
-                info(f"(timeout) run still going — `puras optimize-report {run_id}`")
+                info(f"(timeout) still going — `puras hindsight-show {run_id}`")
                 return
             time.sleep(args.interval)
     finally:
@@ -988,16 +952,46 @@ def cmd_optimize(args) -> None:
     if args.json:
         print(json.dumps(rep, indent=2))
     else:
-        _print_optimize_report(rep)
+        _print_hindsight_report(rep)
 
 
-def cmd_optimize_report(args) -> None:
+def cmd_hindsight_list(args) -> None:
+    """`puras hindsight-list [--skill X]` — list/search past retrospectives."""
     client = _client()
     try:
-        rep = client.get(f"/v1/optimizations/{args.run_id}")
+        sid = _skillpack_id(args)
+        params = {"skill": args.skill} if args.skill else None
+        runs = client.get(f"/v1/skillpacks/{sid}/hindsight", params=params)
+    finally:
+        client.close()
+    if args.json:
+        print(json.dumps(runs, indent=2))
+        return
+    if not runs:
+        info("no retrospectives yet")
+        return
+    rows = [
+        [
+            r.get("id"),
+            r.get("skill_name"),
+            r.get("status"),
+            r.get("jobs_analyzed"),
+            (r.get("stats") or {}).get("n_findings", 0),
+            r.get("trigger"),
+        ]
+        for r in runs
+    ]
+    table(rows, ["id", "skill", "status", "runs", "findings", "trigger"])
+
+
+def cmd_hindsight_show(args) -> None:
+    """`puras hindsight-show <run_id>` — read one retrospective report."""
+    client = _client()
+    try:
+        rep = client.get(f"/v1/hindsight/{args.run_id}")
     finally:
         client.close()
     if args.json:
         print(json.dumps(rep, indent=2))
     else:
-        _print_optimize_report(rep)
+        _print_hindsight_report(rep)

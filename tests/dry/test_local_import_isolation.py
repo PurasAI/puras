@@ -52,8 +52,6 @@ import worker.prompt_cache         # noqa: F401  (made light)
 import worker.storage              # noqa: F401  (made light)
 import worker.eval_runner          # noqa: F401  (offline grading; made light)
 import worker.eval_local           # noqa: F401  (puras eval --local)
-import worker.optimizer_core        # noqa: F401  (prompt optimizer — pure core)
-import worker.optimizer_local       # noqa: F401  (puras optimize --local)
 import worker.local_server         # noqa: F401  (puras serve — stdlib http only)
 
 # And the blocker really is active (guards against a no-op test).

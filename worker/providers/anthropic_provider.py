@@ -87,7 +87,7 @@ class AnthropicProvider(Provider):
         extra_body = {"context_management": ctx_mgmt} if ctx_mgmt else None
         # Only send `tools` when there is at least one — the Anthropic API rejects
         # `tools: null` ("Input should be a valid array"). Normal agent turns always
-        # pass real tools, but the optimizer's proposer calls with no tools, so omit
+        # pass real tools, but the rubric LLM-judge calls with no tools, so omit
         # the param entirely rather than forwarding None.
         create_kwargs = dict(
             model=self.model_id,
