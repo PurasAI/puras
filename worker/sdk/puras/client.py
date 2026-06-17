@@ -192,6 +192,44 @@ class Client:
             job = self.get(job_id)
         return job
 
+    def feedback(
+        self,
+        job_id: str,
+        *,
+        rating: int = 0,
+        comment: str | None = None,
+        end_user_id: str | None = None,
+    ) -> dict:
+        """Record end-user feedback on a job's result.
+
+        `rating` is a thumb: `+1` (good), `-1` (bad), or `0` (comment-only).
+        `comment` is free-form text (the user's words on *why*). At least one
+        of a non-zero `rating` or a `comment` is required.
+
+        `end_user_id` keys the feedback to one of your end users (any opaque
+        id of yours). Posting again with the same `(job, end_user_id)`
+        overwrites that user's rating/comment in place, so a thumb can be
+        toggled or a comment edited. Omit it and the feedback is keyed to the
+        API key's identity instead (one row per job).
+
+        Returns the stored feedback object. Typical flow is `run()` →
+        show the result → `feedback(job_id, rating=+1)`."""
+        if rating not in (-1, 0, 1):
+            raise ValueError("rating must be -1, 0, or +1")
+        if rating == 0 and not comment:
+            raise ValueError("feedback needs a non-zero rating or a comment")
+        body: dict[str, Any] = {"rating": rating}
+        if comment is not None:
+            body["comment"] = comment
+        if end_user_id is not None:
+            body["end_user_id"] = end_user_id
+        return self._request(
+            "POST",
+            f"/v1/jobs/{job_id}/feedback",
+            json_body=body,
+            timeout=self.timeout,
+        )
+
     # ── internals ────────────────────────────────────────────────────────────
     def _target(self, skill: str, skillpack: str | None) -> tuple[str, str]:
         """Split a call into `(skillpack_ref, skill_name)`.

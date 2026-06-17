@@ -136,6 +136,15 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("job_id")
     sp.add_argument("--json", action="store_true", help="print the raw spans as JSON")
 
+    fb = add("feedback", c.cmd_feedback, "rate a job's result (👍/👎 + optional comment)")
+    fb.add_argument("job_id")
+    grp = fb.add_mutually_exclusive_group()
+    grp.add_argument("--up", dest="rating", action="store_const", const="up", help="thumbs up (good result)")
+    grp.add_argument("--down", dest="rating", action="store_const", const="down", help="thumbs down (bad result)")
+    fb.set_defaults(rating="none")
+    fb.add_argument("--comment", "-c", help="free-form note on why")
+    fb.add_argument("--end-user", dest="end_user", metavar="ID", help="opaque id of the end user this feedback is for")
+
     rpl = add("replay", c.cmd_replay, "re-run a past job's inputs (reproduce it locally)")
     rpl.add_argument("job_id", help="the job to replay")
     rpl.add_argument("--version", type=int, help="pin a deployment version (default: active / local)")

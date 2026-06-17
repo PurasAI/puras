@@ -642,6 +642,26 @@ def cmd_spans(args) -> None:
         _walk(r, 0)
 
 
+def cmd_feedback(args) -> None:
+    """Record a thumb (+1 / -1) and/or a comment on a finished job's result, so
+    you can later see which skills run well and which don't."""
+    rating = {"up": 1, "down": -1, "none": 0}[args.rating]
+    if rating == 0 and not args.comment:
+        raise CliError("nothing to send — pass --up / --down (or --comment)")
+    body: dict = {"rating": rating}
+    if args.comment:
+        body["comment"] = args.comment
+    if args.end_user:
+        body["end_user_id"] = args.end_user
+    client = _client()
+    try:
+        client.post(f"/v1/jobs/{args.job_id}/feedback", json_body=body)
+    finally:
+        client.close()
+    thumb = {1: "👍", -1: "👎", 0: ""}[rating]
+    ok(f"feedback recorded for job {args.job_id} {thumb}".rstrip())
+
+
 # ── secrets ──────────────────────────────────────────────────────────────────
 def cmd_secret_set(args) -> None:
     name, sep, value = args.assignment.partition("=")
