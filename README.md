@@ -72,9 +72,9 @@ output_schema:
 
 ```markdown
 <!-- triage/SKILL.md -->
-You triage inbound support messages. Read the `message`, then call `set_output`
-once with its `category`, `priority`, and a one-line `summary`. Judge priority by
-user impact, not by how loud the message is.
+You triage inbound support messages. Read the `message` and respond with its
+`category`, `priority`, and a one-line `summary`. Judge priority by user impact,
+not by how loud the message is.
 ```
 
 Serve it. `puras serve` exposes the same job API your app will hit in
