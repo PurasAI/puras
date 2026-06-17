@@ -8,7 +8,7 @@
 [![PyPI](https://img.shields.io/pypi/v/puras.svg)](https://pypi.org/project/puras/)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 
-[Why Puras?](#why-puras) · [What's a skill?](#whats-a-skill) · [Docs](https://puras.co/docs) · [Examples](./examples) · [Build a skill](#build-your-own-skill)
+[Why Puras?](#why-puras) · [Getting started](#getting-started) · [Open-source vs Cloud](#open-source-vs-cloud) · [Community](#community) · [License](#license)
 
 </div>
 
@@ -32,22 +32,22 @@ write and maintain per prompt. A skill is that prompt promoted to a real unit:
 If all you need is a single completion, reach for the SDK — Puras earns its place
 the moment a prompt becomes something you run repeatedly, test, and ship.
 
-## What's a skill?
+## Getting started
 
-At its simplest, a skill is two files — a prompt and an input/output contract:
+Install the CLI and the offline runner:
 
-```
-summarize/
-  SKILL.md      # the prompt — the agent's instructions
-  skill.yaml    # the contract — input/output schema (+ optional model, tools, evals)
+```bash
+pip install "puras[local]"
 ```
 
+A skill is a folder — a prompt and an input/output contract. Create two files.
 `skill.yaml` declares what goes in and what comes out:
 
 ```yaml
+# summarize/skill.yaml
 title: Summarizer
 description: Condense a block of text into two plain sentences.
-entrypoint: SKILL.md          # markdown entrypoint = agentic (the file is the system prompt)
+entrypoint: SKILL.md          # markdown entrypoint = agentic; the file is the system prompt
 
 input_schema:
   type: object
@@ -55,171 +55,55 @@ input_schema:
   properties:
     text:
       type: string
-      description: The text to condense.
 
 output_schema:
   type: object
   properties:
     summary:
       type: text
-      description: A two-sentence summary.
 ```
 
 `SKILL.md` is the system prompt the agent runs with:
 
 ```markdown
-You summarize text. Read the `text` input, then call `set_output` once with a
-`summary` of at most two plain sentences. Don't add opinions or extra detail.
+<!-- summarize/SKILL.md -->
+You summarize text. Read the `text` input and call `set_output` once with a
+`summary` of at most two plain sentences — no opinions, no extra detail.
 ```
 
-That's a complete skill — nothing else required. To watch one run, install Puras
-and try the example skillpack that ships in this repo:
+Serve it. `puras serve` exposes the same job API your app will hit in
+production, backed by the local runner on your own LLM key (if no key is set,
+the CLI asks for one):
 
 ```bash
-pip install "puras[local]"
-puras run --local greeter --dir ./examples/hello-world -i name=Ada
+puras serve          # serves ./ → http://127.0.0.1:8787
 ```
 
-- `greeter` — the skill to run
-- `--dir ./examples/hello-world` — the skillpack folder it lives in
-- `-i name=Ada` — an input named in the skill's `input_schema`
-
-Events stream to your console as the agent works; the final JSON output prints
-at the end. A skill can grow from here — declare Python `tools:` the agent can
-call, hand stages to isolated subagents, add `evals:` — but two files is the
-floor.
-
-### From skill to product pipeline
-
-A skill is one stage; a **pipeline** is your app orchestrating skills behind a
-real API. You don't rewrite anything to get there — `puras serve` stands up the
-exact job API your app will call in production, backed by the local runner:
-
-```bash
-puras serve --dir ./my-skillpack          # → http://127.0.0.1:8787
-```
-
-Now your app calls the skill over HTTP, the same way every stage of a pipeline
-does. Chain a few skills (`extract` → `summarize` → `publish`) and you have a
-pipeline — each one a folder, each one independently runnable and testable:
+Now call the skill from your app — point any Puras SDK at the local base URL:
 
 ```python
 import puras
 
 client = puras.Client(api_key="local", api_base="http://127.0.0.1:8787", skillpack="local")
-
-text = fetch_article(url)                       # your code
-summary = client.run("summarize", {"text": text})["summary"]
-post = client.run("write_post", {"summary": summary})
-```
-
-The only thing that changes when you ship is the base URL: point the client at
-`https://api.puras.co`, `puras deploy`, and the **same app code** runs against
-the managed platform.
-
-## Run a skill
-
-```bash
-puras run --local <skill> --dir <skillpack> -i KEY=VALUE [-i KEY2=VALUE2 ...]
-```
-
-- `<skill>` — the skill to run; omit it when the bundle has exactly one.
-- `--dir` — the skillpack bundle root (a folder of `<skill>/skill.yaml`). Defaults to `.`.
-- `-i KEY=VALUE` — an input, repeatable; validated against the skill's `input_schema`.
-- `--model claude/sonnet-4-6` — override the skill's model for this run.
-
-The bundled `hello-world` skillpack (used above) has two skills to start from —
-`greeter` (agentic) and `formatter` (deterministic).
-
-From a checkout of this repo instead of PyPI:
-
-```bash
-pip install -e .             # puras-runner (the runtime)
-pip install -e worker/sdk    # the puras CLI + SDK
-```
-
-Programmatic use is the same loop:
-
-```python
-from worker.local_run import run_local
-
-res = run_local("./examples/hello-world", {"name": "Ada"}, skill="greeter")
-print(res["output"])
-```
-
-## Run a skill's evals
-
-Evals are to a skill what unit tests are to code. If a skill declares an `evals:`
-block, run its suite locally and gate on it:
-
-```bash
-puras eval --local content-repurposer --dir ./examples/content-studio --threshold 80
-```
-
-`check` / `exact_match` / `schema` graders run free; a `rubric` (LLM-as-judge)
-grader runs on your key. `--threshold N` is a CI gate — non-zero exit if the
-pass-rate is below `N`.
-
-## Build your app against a local API
-
-`puras run --local` answers *"does my skill work?"*. When you're building the
-**app** that calls the skill, you want the other half: a local server that speaks
-the same API your app will hit in production. That's `puras serve`:
-
-```bash
-puras serve --dir ./examples/hello-world          # → http://127.0.0.1:8787
-```
-
-It mirrors the hosted **job API** (`POST /v1/jobs`, `GET /v1/jobs/{id}`,
-`…/events`, `…/spans`) backed by the offline runner — in-memory, zero extra
-dependencies. Point any Puras SDK at it by changing one thing — the base URL —
-and your app runs unchanged, offline:
-
-```python
-import puras
-
-# api_base is the only thing that differs between local and prod
-client = puras.Client(api_key="local", api_base="http://127.0.0.1:8787", skillpack="local")
-print(client.run("greeter", {"name": "Ada"}))
+out = client.run("summarize", {"text": "...a long article..."})
+print(out["summary"])
 ```
 
 ```ts
 import { Puras } from "puras";
+
 const puras = new Puras({ apiKey: "local", apiBase: "http://127.0.0.1:8787", skillpack: "local" });
-console.log(await puras.run("greeter", { name: "Ada" }));
+const { summary } = await puras.run("summarize", { text: "...a long article..." });
+console.log(summary);
 ```
 
-…or just curl it:
+That's the whole loop. When you ship, change the base URL to
+`https://api.puras.co`, run `puras deploy`, and the **same app code** runs
+against the managed platform — nothing else changes.
 
-```bash
-curl -s "http://127.0.0.1:8787/v1/jobs?wait=true" \
-  -H "content-type: application/json" \
-  -d '{"skill": "greeter", "inputs": {"name": "Ada"}}'
-```
-
-Auth is open locally; `--require-key <token>` emulates API-key auth, and
-`--host` / `--port` change where it binds. (The Python and React-Native SDKs
-poll, so they work as-is; live SSE streaming is a hosted feature.)
-
-## Build your own skill
-
-```bash
-cp -r examples/skillpack-template my-skillpack
-$EDITOR my-skillpack/my-skill/SKILL.md      # the prompt
-$EDITOR my-skillpack/my-skill/skill.yaml    # schema, model, tools, evals
-puras run --local --dir ./my-skillpack -i topic=otters
-```
-
-```
-my-skillpack/
-  my-skill/
-    SKILL.md          # the agent's instructions (system prompt)
-    skill.yaml        # input/output schema + model + tools + evals
-    tools/...         # optional deterministic Python tools the agent can call
-```
-
-When you're happy, the same bundle deploys to the hosted platform unchanged.
-See the [docs](https://puras.co/docs) to deploy and call skills over the API.
+> Want to iterate faster? `puras run --local summarize -i text="…"` runs a skill
+> straight from the CLI, `puras eval --local` gates it on evals, and the
+> [`examples/`](./examples) folder has ready-to-run skillpacks.
 
 ## Open-source vs Cloud
 
@@ -248,33 +132,20 @@ crippled core — it's the capabilities that need real infrastructure.
 
 The local runner gives you the free, offline core; the hosted platform adds the
 managed surface — persistence, scale, durable resume, retrospectives — for when
-you ship. Most tools work the same in both places: media and web run on your own
-keys locally and through the managed services in the cloud, and workspace memory
-persists across `puras run --local` invocations in a local SQLite store. The
-included examples (`hello-world`, `skillpack-template`, `content-studio`) use
-only the local surface and run end-to-end offline.
+you ship the same bundle unchanged.
 
-## How it works
-
-The runner runs the agent on a `LocalRunContext` with `platform_enabled=False`
-(but `memory_enabled=True` — its `memory_backend()` returns the SQLite store).
-That `RunContext` seam is the whole trick: one agent loop, two environments. The
-offline import path is kept **dependency-light** — no Postgres/bucket/openai at
-import time — and that's enforced by
-`tests/dry/test_local_import_isolation.py`.
-
-| Path | What |
-| --- | --- |
-| `worker/` | The `puras-runner` runtime — the agent loop (`agent_runner.py`), the `RunContext` seam, the local entrypoint (`local_run.py`), skill loading, the eval runner. |
-| `worker/sdk/` | The `puras` package — the CLI and the SDK skills import at runtime. Ships as its own wheel. |
-| `examples/` | Runnable, offline-capable skillpacks. |
-| `tests/` | The dependency-light import-isolation guard, a CLI smoke test, and the `puras serve` API tests. |
-
-## Community & contributing
+## Community
 
 Questions, bugs, and skill ideas are welcome in
 [Issues](../../issues) and [Discussions](../../discussions). PRs that improve the
 runner, the docs, or the examples are appreciated.
+
+Working from a checkout instead of PyPI:
+
+```bash
+pip install -e .             # puras-runner (the runtime)
+pip install -e worker/sdk    # the puras CLI + SDK
+```
 
 ## License
 
