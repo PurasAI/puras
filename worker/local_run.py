@@ -53,6 +53,14 @@ def _prepare_env(api_key: str | None, drive_path: str | None) -> None:
     os.environ.setdefault(
         "WORKDIR_ROOT", str(Path(tempfile.gettempdir()) / "puras-local" / "jobs")
     )
+    # Per-skill venvs + extracted bundles cache under deployments_root. Its
+    # hosted default (/var/puras/deployments) is root-owned and unwritable for a
+    # `pip install` user, so redirect it under the same local scratch folder as
+    # the drive/workdir above — otherwise build_skill_python() dies on mkdir.
+    os.environ.setdefault(
+        "DEPLOYMENTS_ROOT",
+        str(Path(tempfile.gettempdir()) / "puras-local" / "deployments"),
+    )
     if api_key:
         os.environ["ANTHROPIC_API_KEY"] = api_key
     if not os.environ.get("ANTHROPIC_API_KEY"):
