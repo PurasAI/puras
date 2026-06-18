@@ -47,9 +47,13 @@ def _prepare_env(api_key: str | None, drive_path: str | None) -> None:
     os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "")
     os.environ.setdefault("PURAS_SERVICE_TOKEN", "")
     os.environ["PURAS_LOCAL_MODE"] = "1"
-    os.environ["LOCAL_DRIVE_PATH"] = drive_path or str(
-        Path(tempfile.gettempdir()) / "puras-local" / "drive"
-    )
+    # Precedence: explicit --drive-path → an exported $LOCAL_DRIVE_PATH → the
+    # local scratch default. The middle term is what keeps a user's exported
+    # value from being clobbered (the `setdefault` promise in this docstring) —
+    # plain assignment can't fall back to it, but the flag must still win.
+    os.environ["LOCAL_DRIVE_PATH"] = drive_path or os.environ.get(
+        "LOCAL_DRIVE_PATH"
+    ) or str(Path(tempfile.gettempdir()) / "puras-local" / "drive")
     os.environ.setdefault(
         "WORKDIR_ROOT", str(Path(tempfile.gettempdir()) / "puras-local" / "jobs")
     )
