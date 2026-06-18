@@ -41,7 +41,7 @@ the moment a prompt becomes something you run repeatedly, test, and ship.
 Install the CLI and the offline runner:
 
 ```bash
-pip install "puras[local]"
+pip install puras
 ```
 
 A skill is a folder — a prompt and an input/output contract. Create two files.
