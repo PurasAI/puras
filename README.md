@@ -8,7 +8,7 @@
 [![PyPI](https://img.shields.io/pypi/v/puras.svg)](https://pypi.org/project/puras/)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 
-[Why Puras?](#why-puras) · [Getting started](#getting-started) · [Open-source vs Cloud](#open-source-vs-cloud) · [Community](#community) · [License](#license)
+[Why Puras?](#why-puras) · [Docs](https://puras.co/docs/cli-reference) · [Getting started](#getting-started) · [Open-source vs Cloud](#open-source-vs-cloud) · [Community](#community) · [License](#license) 
 
 </div>
 
