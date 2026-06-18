@@ -22,12 +22,15 @@ from .bundle import skill_dirs, zip_skillpack
 from .client import ApiClient, ApiError
 from .config import (
     DEFAULT_API_BASE,
+    GLOBAL_FILE,
     PROJECT_FILE,
     Auth,
     clear_auth,
     load_auth,
+    load_llm_key,
     load_project,
     save_auth,
+    save_llm_key,
     save_project,
 )
 from .template import scaffold_blank, scaffold_hello_world
@@ -103,17 +106,21 @@ def _skill_ref(args) -> tuple[dict, str]:
 def _resolve_llm_key(args) -> str | None:
     """Resolve the BYO LLM key for a local run/serve/eval.
 
-    Priority: `--api-key` → `$ANTHROPIC_API_KEY` → interactive terminal
-    prompt. A local run is BYO key (you call the provider, you pay the bill),
-    so when neither the flag nor the env var is set we ask for it right here
-    instead of letting the run fail. Returns the key, or None when there's no
-    TTY to prompt on (the downstream runner then raises its own clear
-    "no LLM key" error)."""
+    Priority: `--api-key` → `$ANTHROPIC_API_KEY` → key saved by a prior prompt
+    (~/.puras/config.json) → interactive terminal prompt. A local run is BYO key
+    (you call the provider, you pay the bill); the first prompt is PERSISTED so
+    later runs don't re-ask. Returns the key, or None when there's no TTY to
+    prompt on (the downstream runner then raises its own clear "no LLM key"
+    error)."""
     import os
 
     key = getattr(args, "api_key", None) or os.environ.get("ANTHROPIC_API_KEY")
     if key:
         return key
+    # A key persisted by an earlier run — so the prompt is one-time, not per-run.
+    saved = load_llm_key()
+    if saved:
+        return saved
     if not sys.stdin.isatty():
         return None
     info(dim("no LLM key found — a local run is BYO key (you call the provider, you pay the bill)."))
@@ -122,6 +129,9 @@ def _resolve_llm_key(args) -> str | None:
     except (EOFError, KeyboardInterrupt):
         print()
         return None
+    if key:
+        save_llm_key(key)
+        info(dim(f"saved to {GLOBAL_FILE} (chmod 600) — won't ask again; clear with `puras logout`."))
     return key or None
 
 
