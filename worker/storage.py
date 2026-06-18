@@ -297,6 +297,12 @@ def relocate_outputs_to_run_dir(workspace_id: str, deliverable, out_dir: str):
             return value
         if "/" not in rel or ".." in rel.split("/"):
             return value
+        # A real on-disk file keeps every path segment within NAME_MAX (255
+        # bytes). Free-text output that merely happens to contain "/" (e.g. a
+        # model's prose) is not a path — probing it with is_file() would raise
+        # OSError(ENAMETOOLONG), so treat over-long segments as non-paths.
+        if any(len(seg.encode()) > 255 for seg in rel.split("/")):
+            return value
         if rel.startswith(prefix):
             return value  # already in the run folder
         if rel in moved:
