@@ -126,6 +126,7 @@ crippled core — it's the capabilities that need real infrastructure.
 | Agent loop & local tools     | ✓ text, `bash`, file tools, your Python tools, in-process subagents | ✓ same loop                |
 | Job API for your app         | ✓ `puras serve` — the job API on localhost | ✓ api.puras.co — managed, scaled, durable     |
 | Evals (`check`/`schema`/`rubric`) | ✓ per run + offline suites           | ✓ + suites at scale, CI gating, version diffs  |
+| Guardrails (input/tool/output/retrieval rails, fail-closed) | —             | ✓ enforce safety rails at runtime — PII/injection/policy, block/redact/approve |
 | Media (image/video/audio)    | ✓ `generate_*` direct to the provider     | ✓ generation + persistence (bucket-backed)     |
 | Web search / fetch / browser | ✓ search + fetch                          | ✓ search / fetch / browser screenshots         |
 | Shared memory                | ✓ persistent, local SQLite                | ✓ persistent, workspace-scoped + semantic (pgvector) |
