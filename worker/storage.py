@@ -116,6 +116,14 @@ def _ensure_local_object_uploaded(bucket: str, path: str) -> bool:
     return True
 
 
+def _within_name_max(rel: str) -> bool:
+    """A real drive object keeps every path segment within NAME_MAX (255 bytes).
+    Free-text output (e.g. a model's prose) that merely contains "/" is not a
+    path — treating it as one makes os.stat()/is_file() raise
+    OSError(ENAMETOOLONG). Drop such strings before they reach the filesystem."""
+    return all(len(seg.encode()) <= 255 for seg in rel.split("/"))
+
+
 def _candidate_drive_paths(obj) -> list[str]:
     """Collect drive-relative paths referenced in a job's inputs.
 
@@ -129,7 +137,7 @@ def _candidate_drive_paths(obj) -> list[str]:
     def add(p):
         if isinstance(p, str):
             s = p.strip().lstrip("/")
-            if s and ".." not in s.split("/"):
+            if s and ".." not in s.split("/") and _within_name_max(s):
                 out.append(s)
 
     def walk(v):
@@ -224,7 +232,10 @@ def _output_drive_paths(obj) -> list[str]:
     def walk(v):
         if isinstance(v, str):
             s = v.strip().lstrip("/")
-            if s and "://" not in s and not s.startswith("data:") and "/" in s and ".." not in s.split("/"):
+            if (
+                s and "://" not in s and not s.startswith("data:")
+                and "/" in s and ".." not in s.split("/") and _within_name_max(s)
+            ):
                 out.append(s)
         elif isinstance(v, dict):
             for val in v.values():
@@ -297,11 +308,9 @@ def relocate_outputs_to_run_dir(workspace_id: str, deliverable, out_dir: str):
             return value
         if "/" not in rel or ".." in rel.split("/"):
             return value
-        # A real on-disk file keeps every path segment within NAME_MAX (255
-        # bytes). Free-text output that merely happens to contain "/" (e.g. a
-        # model's prose) is not a path — probing it with is_file() would raise
-        # OSError(ENAMETOOLONG), so treat over-long segments as non-paths.
-        if any(len(seg.encode()) > 255 for seg in rel.split("/")):
+        # Over-long free-text is not a path (see _within_name_max); probing it
+        # with is_file() would raise OSError(ENAMETOOLONG).
+        if not _within_name_max(rel):
             return value
         if rel.startswith(prefix):
             return value  # already in the run folder
