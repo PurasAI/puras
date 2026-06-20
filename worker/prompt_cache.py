@@ -200,6 +200,7 @@ async def cached_messages_create(
     max_tokens: int,
     cache_messages: bool,
     use_cache: bool,
+    cache_ttl: str = "5m",
 ) -> tuple[NormalizedResponse, bool]:
     """Run one inference, serving from the exact-match cache when possible.
 
@@ -207,7 +208,11 @@ async def cached_messages_create(
     store (its `upstream_cost_micros` is the ORIGINAL call's cost, so the caller
     can report the savings) and no upstream call is made. On a miss the fresh
     response is stored. Caching is skipped entirely when `use_cache` is False or
-    the feature is disabled."""
+    the feature is disabled.
+
+    `cache_ttl` is the skill's Anthropic prompt-cache TTL ("5m"|"1h"); it tunes
+    the upstream call's cache_control breakpoints + write price but never the
+    exact-match cache key (the response content is identical regardless)."""
     s = get_settings()
     enabled = use_cache and s.prompt_cache_enabled
 
@@ -227,7 +232,7 @@ async def cached_messages_create(
 
     resp = await asyncio.to_thread(
         provider.messages_create, system, messages, tools, max_tokens,
-        cache_messages=cache_messages,
+        cache_messages=cache_messages, cache_ttl=cache_ttl,
     )
     if key is not None:
         await _put(session, key, workspace_id=workspace_id, model_slug=model_slug, resp=resp)

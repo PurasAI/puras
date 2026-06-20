@@ -68,10 +68,15 @@ class Provider(ABC):
         max_tokens: int,
         *,
         cache_messages: bool = False,
+        cache_ttl: str = "5m",
     ) -> NormalizedResponse:
         """Run one inference. Tools are in Anthropic schema; provider translates.
 
         `cache_messages`: when True, request a conversation-history cache
         breakpoint on the last message. Providers without prompt caching
         (OpenRouter today) ignore this flag.
+
+        `cache_ttl`: Anthropic prompt-cache TTL for every cache_control
+        breakpoint on this call — "5m" (default) or "1h". Ignored by providers
+        without Anthropic-style prompt caching.
         """

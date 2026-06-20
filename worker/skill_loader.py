@@ -103,6 +103,10 @@ class LoadedSkill:
     # out-of-scope or over-limit call). See manifest.SkillDecl.
     allowed_tools: list[str] | None = None
     tool_limits: dict[str, int] = field(default_factory=dict)
+    # Anthropic prompt-cache TTL for this skill's cache_control breakpoints
+    # ("5m" default | "1h"). Threaded to the provider on each LLM call. See
+    # manifest.SkillDecl.cache_ttl.
+    cache_ttl: str = "5m"
     # Deterministic-only fields
     py_module: str | None = None              # dotted module from deployment root
     py_func: str | None = None
@@ -144,6 +148,7 @@ def load(manifest: Manifest, deployment_root: Path, name: str) -> LoadedSkill:
             routing=decl.routing,
             allowed_tools=decl.allowed_tools,
             tool_limits=decl.tool_limits,
+            cache_ttl=decl.cache_ttl,
         )
 
     # Deterministic .py skill

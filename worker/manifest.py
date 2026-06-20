@@ -12,6 +12,8 @@ source of truth for that skill's entrypoint, schemas, model, tools, etc.
                                   # OR "main.py:run" for a deterministic skill
     model: claude/sonnet-4-6      # optional, agentic only — see docs/models
     disable_bash: false           # optional, agentic only
+    cache_ttl: 5m                 # optional — Anthropic prompt-cache TTL
+                                  # ("5m" default | "1h" for long tool gaps)
     input_schema:  { Puras dialect } # required, enforced before run
     output_schema: { Puras dialect } # required, enforced after run
     examples:                        # optional, 0..N playground seed scenarios
@@ -83,8 +85,17 @@ TOP_LEVEL_KEYS: frozenset[str] = frozenset(
         "marketing",
         "allowed_tools",
         "tool_limits",
+        "cache_ttl",
     }
 )
+
+# Anthropic prompt-cache TTLs a skill may pin via `cache_ttl:`. "5m" is the
+# Anthropic default (cheaper writes); "1h" survives long tool gaps (e.g. a
+# minutes-long video/image render between LLM turns) at a higher write cost.
+# See providers.anthropic_provider for how this drives cache_control, and
+# pricing.anthropic_cost_micros for the matching write multiplier.
+CACHE_TTLS: frozenset[str] = frozenset({"5m", "1h"})
+DEFAULT_CACHE_TTL = "5m"
 
 
 class ManifestError(ValueError):
@@ -249,6 +260,12 @@ class SkillDecl:
     # tool that has already been called `max` times this run is refused (the model
     # gets a soft error it can react to). Guards runaway loops / cost. {} = none.
     tool_limits: dict[str, int] = field(default_factory=dict)
+    # Anthropic prompt-cache TTL for this skill's cache_control breakpoints
+    # (skill.yaml `cache_ttl:`). "5m" (the Anthropic default, cheaper writes) or
+    # "1h" (survives long tool gaps between LLM turns at a 2× write cost).
+    # Defaults to DEFAULT_CACHE_TTL ("5m"). Ignored by providers without
+    # Anthropic-style prompt caching (OpenRouter).
+    cache_ttl: str = DEFAULT_CACHE_TTL
     # Set for subskills (nested under `<parent>/subskills/<X>/`). Subskills
     # are hidden from submit/list/MCP and only callable from their parent's
     # runtime via `puras.subagent.run("<X>", ...)`. None for top-level skills.
@@ -289,6 +306,7 @@ class SkillDecl:
             "routing": self.routing,
             "allowed_tools": self.allowed_tools,
             "tool_limits": self.tool_limits,
+            "cache_ttl": self.cache_ttl,
             "is_agentic": self.is_agentic,
             "parent_skill": self.parent_skill,
             "marketing": self.marketing,
@@ -638,6 +656,7 @@ def _build_decl(slug: str, path: str, data: Any) -> SkillDecl:
     marketing = _parse_marketing(slug, data)
     allowed_tools = _parse_allowed_tools(slug, data)
     tool_limits = _parse_tool_limits(slug, data)
+    cache_ttl = _parse_cache_ttl(slug, data)
 
     return SkillDecl(
         name=slug,
@@ -657,7 +676,23 @@ def _build_decl(slug: str, path: str, data: Any) -> SkillDecl:
         marketing=marketing,
         allowed_tools=allowed_tools,
         tool_limits=tool_limits,
+        cache_ttl=cache_ttl,
     )
+
+
+def _parse_cache_ttl(slug: str, data: Any) -> str:
+    """`cache_ttl:` — the Anthropic prompt-cache TTL for this skill's
+    cache_control breakpoints. One of CACHE_TTLS ("5m" | "1h"); omitted =
+    DEFAULT_CACHE_TTL ("5m"). Anything else is a manifest error."""
+    raw = data.get("cache_ttl")
+    if raw is None:
+        return DEFAULT_CACHE_TTL
+    if not isinstance(raw, str) or raw.strip() not in CACHE_TTLS:
+        allowed = ", ".join(sorted(CACHE_TTLS))
+        raise ManifestError(
+            f"skills/{slug}: `cache_ttl` must be one of {allowed} (got {raw!r})"
+        )
+    return raw.strip()
 
 
 def _parse_allowed_tools(slug: str, data: Any) -> list[str] | None:
@@ -1118,6 +1153,7 @@ def from_stored_dict(d: dict[str, Any]) -> Manifest:
                 routing=s.get("routing") if isinstance(s.get("routing"), dict) else None,
                 allowed_tools=s.get("allowed_tools") if isinstance(s.get("allowed_tools"), list) else None,
                 tool_limits=s.get("tool_limits") if isinstance(s.get("tool_limits"), dict) else {},
+                cache_ttl=s.get("cache_ttl") if s.get("cache_ttl") in CACHE_TTLS else DEFAULT_CACHE_TTL,
                 parent_skill=s.get("parent_skill"),
                 marketing=s.get("marketing") if isinstance(s.get("marketing"), dict) else None,
             )

@@ -139,10 +139,11 @@ class OpenRouterProvider(Provider):
         max_tokens: int,
         *,
         cache_messages: bool = False,
+        cache_ttl: str = "5m",
     ) -> NormalizedResponse:
         # OpenRouter doesn't expose Anthropic-style prompt caching uniformly
-        # across upstreams, so we accept the flag and no-op.
-        del cache_messages
+        # across upstreams, so we accept the flag + TTL and no-op.
+        del cache_messages, cache_ttl
         try:
             # `usage={"include": True}` makes OpenRouter return upstream cost so we
             # don't have to maintain a per-model pricing table for them.

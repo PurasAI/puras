@@ -39,6 +39,14 @@ ANTHROPIC = {
 _UNKNOWN_FALLBACK = (3_000_000, 15_000_000)
 
 
+# Cache-WRITE multiplier on the base input rate, keyed by the cache_control TTL
+# a call used. Anthropic prices a 5-minute write at 1.25× and a 1-hour write at
+# 2× (a read hit is always 0.1×). The skill's `cache_ttl:` selects the TTL on the
+# breakpoints (providers.anthropic_provider) AND the multiplier here, so the two
+# stay in lockstep. Unknown TTLs fall back to the 5m default.
+_CACHE_WRITE_MULTIPLIER = {"5m": 1.25, "1h": 2.0}
+
+
 def anthropic_cost_micros(
     model: str,
     input_tokens: int,
@@ -46,25 +54,28 @@ def anthropic_cost_micros(
     *,
     cache_creation_input_tokens: int = 0,
     cache_read_input_tokens: int = 0,
+    cache_ttl: str = "5m",
 ) -> int:
     """Anthropic upstream cost in micros, accounting for prompt-cache tokens.
 
     Anthropic's reported `input_tokens` excludes both cache_creation and
     cache_read counts — we bill each at its own multiplier of the model's
     base input rate:
-      - uncached input    → 1.0× input_rate
-      - cache write (1h)  → 2.0× input_rate
-      - cache read (hit)  → 0.1× input_rate
-      - output            → output_rate (unchanged by caching)
+      - uncached input     → 1.0× input_rate
+      - cache write (5m)   → 1.25× input_rate
+      - cache write (1h)   → 2.0× input_rate
+      - cache read (hit)   → 0.1× input_rate
+      - output             → output_rate (unchanged by caching)
 
-    The 2.0× write multiplier matches the 1-HOUR cache TTL set on all
-    cache_control breakpoints (see providers.anthropic_provider._CACHE_CONTROL).
-    If that TTL ever reverts to the 5-minute default, drop this back to 1.25×.
+    `cache_ttl` MUST match the TTL the call set on its cache_control breakpoints
+    (the skill's `cache_ttl:`) so the write multiplier is the price Anthropic
+    actually charges. An unrecognized TTL bills at the 5m default.
     """
     in_rate, out_rate = ANTHROPIC.get(model, _UNKNOWN_FALLBACK)
+    write_mult = _CACHE_WRITE_MULTIPLIER.get(cache_ttl, _CACHE_WRITE_MULTIPLIER["5m"])
     cost = (
         input_tokens * in_rate
-        + cache_creation_input_tokens * in_rate * 2.0
+        + cache_creation_input_tokens * in_rate * write_mult
         + cache_read_input_tokens * in_rate * 0.1
         + output_tokens * out_rate
     ) / 1_000_000

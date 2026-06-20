@@ -4,6 +4,10 @@ description: "Paste one piece of content — a blog post, launch announcement, n
 entrypoint: SKILL.md
 text_model: claude/sonnet-4-6
 
+# Keep the Anthropic prompt-cache prefix alive for an hour across the
+# per-channel drafting turns (vs the "5m" default).
+cache_ttl: 1h
+
 input_schema:
   type: object
   required: [source_content]
