@@ -7,6 +7,11 @@ description: >
 entrypoint: SKILL.md
 text_model: claude/haiku-4-5
 
+# Pin the Anthropic prompt-cache to a 1-hour TTL so a long tool gap (e.g. the
+# poet subagent + media-free render) doesn't expire the cached prefix. Defaults
+# to "5m" when omitted.
+cache_ttl: 1h
+
 # Model routing: run on cheap Haiku, but if it can't produce a schema-valid
 # `set_output` after 2 tries, escalate to Sonnet for the rest of the run. You pay
 # premium only when the cheap model actually struggles — the run timeline shows a

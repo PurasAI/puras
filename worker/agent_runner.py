@@ -2735,6 +2735,9 @@ async def run_agent(
                 tools=tools or None,
                 max_tokens=16384,
                 cache_messages=True,
+                # Per-skill Anthropic prompt-cache TTL (skill.yaml `cache_ttl:`,
+                # "5m" default | "1h" for long tool gaps between LLM turns).
+                cache_ttl=skill.cache_ttl,
                 # The exact-match prompt cache is Postgres-backed — off for a local
                 # run (no DB); the BYO-key user pays their own provider directly.
                 use_cache=use_cache and ctx.platform_enabled,

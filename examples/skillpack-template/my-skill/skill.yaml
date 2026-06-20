@@ -12,6 +12,11 @@ entrypoint: SKILL.md
 # default. Media slots exist too: image_model / video_model / audio_model.
 # text_model: claude/haiku-4-5
 
+# Anthropic prompt-cache TTL: "5m" (default) or "1h". "1h" keeps the cached
+# prefix alive across long tool gaps (e.g. a minutes-long media render between
+# LLM turns) at a higher cache-write cost.
+cache_ttl: 1h
+
 input_schema:
   type: object
   required: [prompt]

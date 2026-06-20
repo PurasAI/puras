@@ -8,12 +8,19 @@ from ..config import get_settings
 from ..pricing import anthropic_cost_micros
 from .base import NormalizedResponse, NormalizedToolUse, Provider
 
-# Prompt-cache breakpoints use a 1-HOUR TTL (vs Anthropic's 5-minute default) so
-# a long tool gap — e.g. a video/image generation that runs minutes between LLM
-# turns — doesn't expire the cached prefix and force a full (and pricey)
-# re-write. Trade-off: a 1h cache WRITE costs 2× the input rate (5m = 1.25×);
-# that multiplier lives in pricing.anthropic_cost_micros and must stay in sync.
-_CACHE_CONTROL = {"type": "ephemeral", "ttl": "1h"}
+# Prompt-cache breakpoints carry a per-call TTL chosen by the skill (`cache_ttl:`
+# in skill.yaml, default "5m"). "5m" is Anthropic's default (cheaper writes);
+# "1h" keeps a cached prefix alive across a long tool gap — e.g. a video/image
+# generation that runs minutes between LLM turns — so it isn't re-written from
+# scratch. Trade-off: a 1h cache WRITE costs 2× the input rate (5m = 1.25×);
+# that multiplier lives in pricing.anthropic_cost_micros and is selected by the
+# same `cache_ttl`, so the two must move together.
+DEFAULT_CACHE_TTL = "5m"
+
+
+def _cache_control(ttl: str) -> dict:
+    """An ephemeral cache_control breakpoint at the given Anthropic TTL."""
+    return {"type": "ephemeral", "ttl": ttl}
 
 # Server-side context editing (beta). Clears old tool results once the prompt
 # grows past a threshold, keeping recent ones, so a long multi-step run doesn't
@@ -76,10 +83,12 @@ class AnthropicProvider(Provider):
         max_tokens: int,
         *,
         cache_messages: bool = False,
+        cache_ttl: str = DEFAULT_CACHE_TTL,
     ) -> NormalizedResponse:
-        sys_blocks = _system_with_cache(system)
-        cached_tools = _tools_with_cache(tools)
-        msgs = _messages_with_cache_breakpoint(messages) if cache_messages else messages
+        cc = _cache_control(cache_ttl)
+        sys_blocks = _system_with_cache(system, cc)
+        cached_tools = _tools_with_cache(tools, cc)
+        msgs = _messages_with_cache_breakpoint(messages, cc) if cache_messages else messages
         # Context editing rides on extra_headers/extra_body so it works across
         # the whole anthropic>=0.42 pin without depending on typed beta params.
         ctx_mgmt = _context_management_body()
@@ -125,12 +134,13 @@ class AnthropicProvider(Provider):
                 resp.usage.output_tokens,
                 cache_creation_input_tokens=cache_write,
                 cache_read_input_tokens=cache_read,
+                cache_ttl=cache_ttl,
             ),
             context_management_applied=_extract_context_management(resp),
         )
 
 
-def _system_with_cache(system: str) -> list[dict] | str:
+def _system_with_cache(system: str, cc: dict) -> list[dict] | str:
     """Wrap the system prompt in a single text block with an ephemeral
     cache_control breakpoint, so the system prefix is reused across calls.
 
@@ -139,10 +149,10 @@ def _system_with_cache(system: str) -> list[dict] | str:
     """
     if not system:
         return system
-    return [{"type": "text", "text": system, "cache_control": {**_CACHE_CONTROL}}]
+    return [{"type": "text", "text": system, "cache_control": {**cc}}]
 
 
-def _tools_with_cache(tools: list[dict] | None) -> list[dict] | None:
+def _tools_with_cache(tools: list[dict] | None, cc: dict) -> list[dict] | None:
     """Add a cache_control breakpoint to the last tool definition.
 
     Anthropic caches the entire `tools` array up to and including the tool
@@ -152,10 +162,10 @@ def _tools_with_cache(tools: list[dict] | None) -> list[dict] | None:
     """
     if not tools:
         return tools
-    return [*tools[:-1], {**tools[-1], "cache_control": {**_CACHE_CONTROL}}]
+    return [*tools[:-1], {**tools[-1], "cache_control": {**cc}}]
 
 
-def _messages_with_cache_breakpoint(messages: list[dict]) -> list[dict]:
+def _messages_with_cache_breakpoint(messages: list[dict], cc: dict) -> list[dict]:
     """Return a copy of `messages` with an ephemeral cache_control marker on
     the last content block of the last message.
 
@@ -172,11 +182,11 @@ def _messages_with_cache_breakpoint(messages: list[dict]) -> list[dict]:
         if not content:
             return out
         last["content"] = [
-            {"type": "text", "text": content, "cache_control": {**_CACHE_CONTROL}}
+            {"type": "text", "text": content, "cache_control": {**cc}}
         ]
     elif isinstance(content, list) and content:
         new_blocks = [dict(b) for b in content]
-        new_blocks[-1] = {**new_blocks[-1], "cache_control": {**_CACHE_CONTROL}}
+        new_blocks[-1] = {**new_blocks[-1], "cache_control": {**cc}}
         last["content"] = new_blocks
     else:
         return out
