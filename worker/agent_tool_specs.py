@@ -31,13 +31,16 @@ TODO_WRITE_TOOL_SPEC = {
     "description": (
         "Record or update your working plan as an ordered checklist. Pass the "
         "FULL list every time — it REPLACES the previous one (this tool keeps no "
-        "state of its own). Use it to break a non-trivial job into concrete "
-        "steps before you start, then keep it live: mark a step `in_progress` "
-        "right before you begin it and `completed` the moment it's done. Keep "
-        "exactly one step `in_progress` at a time. The list is surfaced to the "
-        "user as a live progress checklist; it does not run anything itself. "
-        "Skip it for trivial one-step tasks — reach for it when work spans "
-        "several stages (e.g. spec → plan → build → validate)."
+        "state of its own). Reserve it for genuinely complex jobs — many steps, "
+        "branching or non-linear paths, or several subagents to coordinate — "
+        "where keeping a live checklist actually keeps you on course. When you "
+        "use it, keep it live: mark a step `in_progress` right before you begin "
+        "it and `completed` the moment it's done, with exactly one step "
+        "`in_progress` at a time. The list is surfaced to the user as a live "
+        "progress checklist; it does not run anything itself. Do NOT use it for "
+        "short, linear jobs — a handful of sequential steps you can just carry "
+        "out: each call costs tokens and latency, so a simple three- or "
+        "four-step task should be executed directly, not planned."
     ),
     "input_schema": {
         "type": "object",
